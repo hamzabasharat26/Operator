@@ -1,0 +1,9 @@
+{
+    "annotation_name": "S",
+    "article_style": "ADD-TS-001",
+    "annotation_json_path": "D:\\RJM\\operatorPannel-main\\temp_annotations\\ADD-TS-001_S.json",
+    "reference_image_path": "D:\\RJM\\operatorPannel-main\\temp_annotations\\ADD-TS-001_S.jpg",
+    "side": "front",
+    "laravel_storage": "D:\\RJM\\magicQC\\public\\storage",
+    "results_path": "D:\\RJM\\operatorPannel-main\\storage\\measurement_results"
+}

@@ -1,0 +1,424 @@
+import { app, BrowserWindow, ipcMain, session } from 'electron'
+import bcrypt from 'bcryptjs'
+import { fileURLToPath } from 'node:url'
+import path from 'node:path'
+import { spawn, ChildProcess } from 'node:child_process'
+import { initializeDatabase, closeDatabase, query, queryOne, execute } from './database'
+
+// Get __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
+
+// The built directory structure
+//
+// ├─┬─┬ dist
+// │ │ └── index.html
+// │ │
+// │ ├─┬ dist-electron
+// │ │ ├── main.js
+// │ │ └── preload.mjs
+// │
+process.env.APP_ROOT = path.join(__dirname, '..')
+
+// 🚧 Use ['ENV_NAME'] avoid vite:define plugin - Vite@2.x
+export const VITE_DEV_SERVER_URL = process.env['VITE_DEV_SERVER_URL']
+export const MAIN_DIST = path.join(process.env.APP_ROOT, 'dist-electron')
+export const RENDERER_DIST = path.join(process.env.APP_ROOT, 'dist')
+
+process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, 'public') : RENDERER_DIST
+
+let win: BrowserWindow | null
+let pythonProcess: ChildProcess | null = null
+
+// Start Python API server automatically
+async function startPythonServer(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const pythonScript = path.join(process.env.APP_ROOT!, 'api_server.py')
+    console.log('🐍 Starting Python API server:', pythonScript)
+    
+    try {
+      // Spawn Python process (hidden, no console window)
+      pythonProcess = spawn('python', [pythonScript], {
+        cwd: process.env.APP_ROOT,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true, // Hide console window on Windows
+        detached: false
+      })
+
+      pythonProcess.stdout?.on('data', (data) => {
+        console.log(`[Python] ${data.toString().trim()}`)
+      })
+
+      pythonProcess.stderr?.on('data', (data) => {
+        console.error(`[Python Error] ${data.toString().trim()}`)
+      })
+
+      pythonProcess.on('error', (err) => {
+        console.error('❌ Failed to start Python server:', err)
+        pythonProcess = null
+        resolve(false)
+      })
+
+      pythonProcess.on('exit', (code) => {
+        console.log(`🐍 Python server exited with code ${code}`)
+        pythonProcess = null
+      })
+
+      // Wait for server to be ready (check health endpoint)
+      waitForPythonServer().then(resolve)
+    } catch (error) {
+      console.error('❌ Error starting Python server:', error)
+      resolve(false)
+    }
+  })
+}
+
+// Wait for Python server to be ready
+async function waitForPythonServer(maxRetries = 30, delay = 500): Promise<boolean> {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch('http://localhost:5000/health')
+      if (response.ok) {
+        console.log('✅ Python API server is ready')
+        return true
+      }
+    } catch {
+      // Server not ready yet, wait and retry
+    }
+    await new Promise(r => setTimeout(r, delay))
+  }
+  console.error('❌ Python server did not start in time')
+  return false
+}
+
+// Stop Python server
+function stopPythonServer() {
+  if (pythonProcess) {
+    console.log('🛑 Stopping Python API server...')
+    try {
+      // On Windows, we need to kill the process tree
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/pid', pythonProcess.pid!.toString(), '/f', '/t'], { windowsHide: true })
+      } else {
+        pythonProcess.kill('SIGTERM')
+      }
+    } catch (error) {
+      console.error('Error stopping Python server:', error)
+    }
+    pythonProcess = null
+  }
+}
+
+function createWindow() {
+  win = new BrowserWindow({
+    icon: path.join(process.env.VITE_PUBLIC, 'electron-vite.svg'),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.mjs'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: false, // Required for preload script to work with contextBridge
+      // Content Security Policy is set via meta tag in index.html
+    },
+  })
+
+  // Test active push message to Renderer-process.
+  win.webContents.on('did-finish-load', () => {
+    win?.webContents.send('main-process-message', (new Date).toLocaleString())
+  })
+
+  if (VITE_DEV_SERVER_URL) {
+    win.loadURL(VITE_DEV_SERVER_URL)
+  } else {
+    // win.loadFile('dist/index.html')
+    win.loadFile(path.join(RENDERER_DIST, 'index.html'))
+  }
+}
+
+// Quit when all windows are closed, except on macOS. There, it's common
+// for applications and their menu bar to stay active until the user quits
+// explicitly with Cmd + Q.
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit()
+    win = null
+  }
+})
+
+app.on('activate', () => {
+  // On OS X it's common to re-create a window in the app when the
+  // dock icon is clicked and there are no other windows open.
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow()
+  }
+})
+
+// Set up Content Security Policy
+function setupCSP() {
+  // CSP for development (allows Vite HMR)
+  // In production builds, this will be more restrictive
+  const isDev = !!VITE_DEV_SERVER_URL
+
+  const csp = isDev
+    ? "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://localhost:* ws://localhost:* wss://localhost:*; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' data: https://fonts.gstatic.com; img-src 'self' data: https: blob:; connect-src 'self' http://localhost:* ws://localhost:* wss://localhost:*; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none';"
+    : "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: https: blob:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none';"
+
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [csp]
+      }
+    })
+  })
+}
+
+// Initialize database and create window when app is ready
+app.whenReady().then(async () => {
+  try {
+    // Set up Content Security Policy
+    setupCSP()
+
+    // Start Python API server automatically
+    console.log('🚀 Starting application services...')
+    const pythonReady = await startPythonServer()
+    if (pythonReady) {
+      console.log('✅ Python measurement server started successfully')
+    } else {
+      console.warn('⚠️ Python server may not be available - measurement features may be limited')
+    }
+
+    // Initialize database connection
+    await initializeDatabase()
+
+    // Set up IPC handlers for database operations
+    setupDatabaseHandlers()
+
+    // Set up IPC handlers for measurement operations
+    setupMeasurementHandlers()
+
+    // Create window
+    createWindow()
+  } catch (error) {
+    console.error('Failed to start application:', error)
+    app.quit()
+  }
+})
+
+// Set up IPC handlers for database operations
+function setupDatabaseHandlers() {
+  // Query handler - returns array of results
+  ipcMain.handle('db:query', async (_event, sql: string, params?: any[]) => {
+    try {
+      const results = await query(sql, params)
+      return { success: true, data: results }
+    } catch (error) {
+      console.error('Database query error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // QueryOne handler - returns single result
+  ipcMain.handle('db:queryOne', async (_event, sql: string, params?: any[]) => {
+    try {
+      const result = await queryOne(sql, params)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('Database queryOne error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Execute handler - for INSERT, UPDATE, DELETE
+  ipcMain.handle('db:execute', async (_event, sql: string, params?: any[]) => {
+    try {
+      const result = await execute(sql, params)
+      return { success: true, data: result }
+    } catch (error) {
+      console.error('Database execute error:', error)
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      }
+    }
+  })
+
+  // Verify PIN handler
+  ipcMain.handle('db:verifyPin', async (_event, pin: string) => {
+    try {
+      console.log(`[AUTH] Attempting login for PIN: ${pin}`);
+      const operators = await query('SELECT id, full_name, employee_id, department, login_pin FROM operators')
+
+      console.log(`[AUTH] Found ${operators.length} operators in database`);
+
+      for (const op of operators) {
+        if (op.login_pin) {
+          // Check for literal match (e.g. if stored as plain '0001')
+          if (op.login_pin === pin) {
+            console.log(`[AUTH] Plaintext match found for: ${op.full_name}`);
+            const { login_pin, ...opSafeData } = op
+            return { success: true, data: opSafeData }
+          }
+
+          // Check for Bcrypt match
+          try {
+            const isMatch = await bcrypt.compare(pin, op.login_pin)
+            console.log(`[AUTH] Bcrypt Match Result for ${op.full_name}: ${isMatch}`);
+            if (isMatch) {
+              const { login_pin, ...opSafeData } = op
+              return { success: true, data: opSafeData }
+            }
+          } catch (e: any) {
+            console.log(`[AUTH] Bcrypt Error: ${e.message}`);
+          }
+        }
+      }
+
+      console.log(`[AUTH] No match found for PIN: ${pin}`);
+      return { success: false, error: 'Invalid PIN. Please try again.' }
+    } catch (error) {
+      console.error('[AUTH] System error:', error)
+      return { success: false, error: 'Authentication service unavailable' }
+    }
+  })
+}
+
+// Set up IPC handlers for measurement operations
+function setupMeasurementHandlers() {
+  const PYTHON_API_URL = 'http://localhost:5000'
+
+  // Helper function to make API calls with retry
+  async function fetchWithRetry(url: string, options?: RequestInit, maxRetries = 3): Promise<Response> {
+    let lastError: Error | null = null
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        const response = await fetch(url, options)
+        return response
+      } catch (error) {
+        lastError = error as Error
+        // Wait before retry
+        await new Promise(r => setTimeout(r, 500))
+      }
+    }
+    throw lastError
+  }
+
+  // Start measurement
+  ipcMain.handle('measurement:start', async (_event, config: { 
+    annotation_name: string; 
+    article_style?: string; 
+    side?: string;
+    // New measurement-ready data from database
+    keypoints_pixels?: string | null;
+    target_distances?: string | null;
+    placement_box?: string | null;
+    image_width?: number | null;
+    image_height?: number | null;
+    // Fallback data
+    annotation_data?: string;
+    image_data?: string;
+    image_mime_type?: string;
+  }) => {
+    try {
+      const response = await fetchWithRetry(`${PYTHON_API_URL}/api/measurement/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      })
+      const result = await response.json()
+      return result
+    } catch (error) {
+      console.error('Failed to start measurement:', error)
+      // Try to restart Python server if it crashed
+      console.log('🔄 Attempting to restart Python server...')
+      const restarted = await startPythonServer()
+      if (restarted) {
+        // Retry the request
+        try {
+          const response = await fetch(`${PYTHON_API_URL}/api/measurement/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+          })
+          return await response.json()
+        } catch {
+          return { status: 'error', message: 'Measurement system unavailable. Please restart the application.' }
+        }
+      }
+      return { status: 'error', message: 'Measurement system is starting. Please try again in a moment.' }
+    }
+  })
+
+  // Stop measurement
+  ipcMain.handle('measurement:stop', async () => {
+    try {
+      const response = await fetch(`${PYTHON_API_URL}/api/measurement/stop`, {
+        method: 'POST'
+      })
+      return await response.json()
+    } catch (error) {
+      return { status: 'error', message: 'Could not stop measurement process' }
+    }
+  })
+
+  // Get current status
+  ipcMain.handle('measurement:getStatus', async () => {
+    try {
+      const response = await fetch(`${PYTHON_API_URL}/api/measurement/status`)
+      return await response.json()
+    } catch (error) {
+      return { status: 'error', message: 'API offline' }
+    }
+  })
+
+  // Get live results
+  ipcMain.handle('measurement:getLiveResults', async () => {
+    try {
+      const response = await fetch(`${PYTHON_API_URL}/api/results/live`)
+      return await response.json()
+    } catch (error) {
+      return { status: 'error', message: 'Could not fetch live results' }
+    }
+  })
+
+  // Load test image from local file
+  ipcMain.handle('measurement:loadTestImage', async (_event, relativePath: string) => {
+    try {
+      const path = await import('path')
+      const fs = await import('fs')
+      
+      // Resolve path relative to app root
+      const appRoot = process.cwd()
+      const imagePath = path.join(appRoot, relativePath)
+      
+      console.log('[MAIN] Loading test image from:', imagePath)
+      
+      if (!fs.existsSync(imagePath)) {
+        console.log('[MAIN] Test image not found:', imagePath)
+        return { status: 'error', message: 'Test image not found: ' + imagePath }
+      }
+      
+      // Read file and convert to base64
+      const imageBuffer = fs.readFileSync(imagePath)
+      const base64Image = imageBuffer.toString('base64')
+      
+      console.log('[MAIN] Loaded test image, base64 length:', base64Image.length)
+      
+      return { status: 'success', data: base64Image }
+    } catch (error) {
+      console.error('[MAIN] Error loading test image:', error)
+      return { status: 'error', message: 'Error loading test image: ' + String(error) }
+    }
+  })
+}
+
+// Close database connection and stop Python server when app quits
+app.on('before-quit', async () => {
+  stopPythonServer()
+  await closeDatabase()
+})
