@@ -5,8 +5,7 @@ import type {
   MeasurementSpec,
   JobCardSummary,
   PurchaseOrderArticle,
-  Brand,
-  ArticleAnnotation
+  Brand
 } from '../types/database'
 
 interface ArticleType {
@@ -67,6 +66,14 @@ export function ArticlesList() {
 
   // Saving state
   const [isSaving, setIsSaving] = useState(false)
+
+  // Calibration state
+  const [calibrationStatus, setCalibrationStatus] = useState<{
+    calibrated: boolean
+    pixels_per_cm?: number
+    calibration_date?: string
+  } | null>(null)
+  const [isCalibrating, setIsCalibrating] = useState(false)
 
   const { operator } = useAuth()
 
@@ -219,16 +226,16 @@ export function ArticlesList() {
 
     if (isPollingActive && measurementSpecs.length > 0) {
       console.log('[POLLING] Starting live measurement polling...')
-      console.log('[POLLING] Measurement specs:', measurementSpecs.map((s, idx) => ({ 
-        index: idx, 
-        specId: s.id, 
-        code: s.code 
+      console.log('[POLLING] Measurement specs:', measurementSpecs.map((s, idx) => ({
+        index: idx,
+        specId: s.id,
+        code: s.code
       })))
-      
+
       intervalId = setInterval(async () => {
         try {
           const result = await window.measurement.getLiveResults()
-          
+
           if (result.status === 'success' && result.data && result.data.measurements) {
             const liveData = result.data.measurements as Array<{
               id: number
@@ -236,7 +243,7 @@ export function ArticlesList() {
               actual_cm: number
               qc_passed: boolean
             }>
-            
+
             console.log('[POLLING] Received', liveData.length, 'live measurements, is_live:', result.data.is_live)
 
             setMeasuredValues(prev => {
@@ -250,11 +257,11 @@ export function ArticlesList() {
               liveData.forEach((liveMeasurement) => {
                 // Use liveMeasurement.id - 1 as the index into measurementSpecs
                 const specIndex = liveMeasurement.id - 1
-                
+
                 if (specIndex >= 0 && specIndex < measurementSpecs.length) {
                   const spec = measurementSpecs[specIndex]
                   const newValue = liveMeasurement.actual_cm.toFixed(2)
-                  
+
                   if (newValues[spec.id] !== newValue) {
                     console.log(`[POLLING] Spec[${specIndex}] ${spec.code} (id=${spec.id}): ${prev[spec.id] || 'empty'} -> ${newValue} cm`)
                     newValues[spec.id] = newValue
@@ -328,7 +335,7 @@ export function ArticlesList() {
       // Filter by both brand AND article type if article type is selected
       let sql: string
       let params: any[]
-      
+
       if (selectedArticleTypeId) {
         sql = `
           SELECT 
@@ -356,7 +363,7 @@ export function ArticlesList() {
         `
         params = [selectedBrandId]
       }
-      
+
       const result = await window.database.query<ArticleWithRelations>(sql, params)
       if (result.success && result.data) {
         setArticles(result.data)
@@ -388,7 +395,7 @@ export function ArticlesList() {
   // Fetch POs that are linked to the selected article via purchase_order_articles
   const fetchPurchaseOrdersForArticle = async () => {
     if (!selectedArticleId || !selectedBrandId) return
-    
+
     try {
       // Get the selected article's details
       const article = articles.find(a => a.id === selectedArticleId)
@@ -396,9 +403,9 @@ export function ArticlesList() {
         console.log('[PO_ARTICLE] Article not found in state:', selectedArticleId)
         return
       }
-      
+
       console.log('[PO_ARTICLE] Finding POs for article:', article.article_style, 'type:', article.article_type_id)
-      
+
       // Find POs that have this article style and type in their purchase_order_articles
       const sql = `
         SELECT DISTINCT po.id, po.po_number, po.brand_id, po.country
@@ -411,15 +418,15 @@ export function ArticlesList() {
         ORDER BY po.po_number
       `
       const result = await window.database.query<PurchaseOrder>(sql, [
-        selectedBrandId, 
-        article.article_type_id, 
+        selectedBrandId,
+        article.article_type_id,
         article.article_style
       ])
-      
+
       if (result.success && result.data) {
         console.log('[PO_ARTICLE] Found', result.data.length, 'POs linked to article:', article.article_style)
         setPurchaseOrders(result.data)
-        
+
         // Auto-select if only one PO exists for this article
         if (result.data.length === 1) {
           console.log('[PO_ARTICLE] Auto-selecting single PO:', result.data[0].po_number)
@@ -577,7 +584,7 @@ export function ArticlesList() {
         `
         result = await window.database.query<MeasurementSpec & { article_id?: number }>(directQuery, [selectedArticleId, size])
         console.log('[SPECS] Direct article query result:', result.data?.length || 0, 'measurements')
-        
+
         if (result.data && result.data.length > 0) {
           // Load available sizes for this article
           fetchAvailableSizes(selectedArticleId)
@@ -610,7 +617,7 @@ export function ArticlesList() {
         `
         result = await window.database.query<MeasurementSpec & { article_id?: number }>(comprehensiveQuery, [poArticleId, size])
         console.log('[SPECS] PO article match result:', result.data?.length || 0, 'measurements')
-        
+
         if (result.data && result.data.length > 0 && result.data[0].article_id) {
           fetchAvailableSizes(result.data[0].article_id)
         }
@@ -641,7 +648,7 @@ export function ArticlesList() {
         `
         result = await window.database.query<MeasurementSpec & { article_id?: number }>(fallback1Query, [poArticleId, size])
         console.log('[SPECS] Fallback 1 result:', result.data?.length || 0, 'measurements')
-        
+
         if (result.data && result.data.length > 0 && result.data[0].article_id) {
           fetchAvailableSizes(result.data[0].article_id)
         }
@@ -671,7 +678,7 @@ export function ArticlesList() {
         `
         result = await window.database.query<MeasurementSpec & { article_id?: number }>(fallback2Query, [poArticleId, size])
         console.log('[SPECS] Fallback 2 result:', result.data?.length || 0, 'measurements')
-        
+
         if (result.data && result.data.length > 0 && result.data[0].article_id) {
           fetchAvailableSizes(result.data[0].article_id)
         }
@@ -728,7 +735,7 @@ export function ArticlesList() {
     })
   }
 
-  
+
   const handleToleranceStep = (specId: number, field: 'tol_plus' | 'tol_minus', delta: number) => {
     setEditableTols(prev => {
       const current = parseFloat(prev[specId]?.[field] || '0') || 0
@@ -757,7 +764,7 @@ export function ArticlesList() {
 
     const minValid = spec.expected_value - tolMinus
     const maxValid = spec.expected_value + tolPlus
-    
+
     return (value >= minValid && value <= maxValid) ? 'PASS' : 'FAIL'
   }
 
@@ -773,11 +780,6 @@ export function ArticlesList() {
   }
 
   const handleStartMeasurement = async () => {
-    if (!selectedPOId) {
-      setError('Please select a Purchase Order first')
-      return
-    }
-
     try {
       // Reset state for new measurement session
       setMeasurementComplete(false)
@@ -799,23 +801,29 @@ export function ArticlesList() {
       }
 
       // Get article style for annotation lookup
-      const articleStyle = jobCardSummary?.article_style || 
-                          articles.find(a => a.id === selectedArticleId)?.article_style
+      const articleStyle = jobCardSummary?.article_style ||
+        articles.find(a => a.id === selectedArticleId)?.article_style
 
       if (!articleStyle) {
         setError('Article style not found. Please select an article.')
         return
       }
 
-      console.log('[MEASUREMENT] Fetching annotation from database for:', articleStyle, 'size:', selectedSize)
+      console.log('[MEASUREMENT] Fetching annotation from uploaded_annotations for:', articleStyle, 'size:', selectedSize)
 
-      // Fetch annotation data from database - include new measurement columns
-      const annotationResult = await window.database.query<ArticleAnnotation>(
-        `SELECT id, article_style, size, name, annotations, 
-                keypoints_pixels, target_distances, placement_box,
-                image_width, image_height,
-                image_data, image_mime_type 
-         FROM article_annotations 
+      // ============== NEW: Fetch from uploaded_annotations table ==============
+      const annotationResult = await window.database.query<{
+        id: number
+        article_id: number
+        article_style: string
+        size: string
+        name: string
+        annotation_data: string  // JSON string
+        image_width: number
+        image_height: number
+      }>(
+        `SELECT id, article_id, article_style, size, name, annotation_data, image_width, image_height
+         FROM uploaded_annotations 
          WHERE article_style = ? AND size = ?`,
         [articleStyle, selectedSize]
       )
@@ -829,112 +837,225 @@ export function ArticlesList() {
       }
 
       if (!annotationResult.data || annotationResult.data.length === 0) {
-        console.log('[MEASUREMENT] No annotation found in database')
-        setError(`No annotation found for ${articleStyle} size ${selectedSize}. Please create annotation first.`)
+        console.log('[MEASUREMENT] No annotation found in uploaded_annotations table')
+        setError(`No uploaded annotation found for ${articleStyle} size ${selectedSize}. Please upload annotation via the web dashboard.`)
         return
       }
 
-      const annotation = annotationResult.data[0]
-      console.log('[MEASUREMENT] Found annotation:', annotation.name, 'ID:', annotation.id)
-      console.log('[MEASUREMENT] Keypoints pixels:', annotation.keypoints_pixels)
-      console.log('[MEASUREMENT] Target distances from DB:', annotation.target_distances)
-      console.log('[MEASUREMENT] Image dimensions:', annotation.image_width, 'x', annotation.image_height)
+      const dbAnnotation = annotationResult.data[0]
+      console.log('[MEASUREMENT] Found uploaded annotation:', dbAnnotation.name, 'ID:', dbAnnotation.id)
+      console.log('[MEASUREMENT] Image dimensions:', dbAnnotation.image_width, 'x', dbAnnotation.image_height)
 
-      // If target_distances is missing, try to generate it from measurements table
-      let targetDistances = annotation.target_distances
-      if (!targetDistances) {
-        console.log('[MEASUREMENT] target_distances is NULL, fetching from measurements table...')
-        
-        // Get the article_id for this annotation
-        const articleResult = await window.database.query<{ id: number }>(
-          `SELECT id FROM articles WHERE article_style = ? LIMIT 1`,
-          [articleStyle]
-        )
-        
-        if (articleResult.success && articleResult.data && articleResult.data.length > 0) {
-          const articleId = articleResult.data[0].id
-          
-          // Fetch measurements and their target values for this article and size
-          const measurementsResult = await window.database.query<{ 
-            measurement_id: number, 
-            measurement_name: string,
-            target_value: number 
-          }>(
-            `SELECT m.id as measurement_id, m.measurement as measurement_name, ms.value as target_value
-             FROM measurements m 
-             JOIN measurement_sizes ms ON m.id = ms.measurement_id 
-             WHERE m.article_id = ? AND ms.size = ?
-             ORDER BY m.id`,
-            [articleId, selectedSize]
-          )
-          
-          if (measurementsResult.success && measurementsResult.data && measurementsResult.data.length > 0) {
-            // Build target_distances object: {"1": value1, "2": value2, ...}
-            const generatedTargets: Record<string, number> = {}
-            measurementsResult.data.forEach((m, index) => {
-              generatedTargets[String(index + 1)] = Number(m.target_value)
-            })
-            
-            targetDistances = JSON.stringify(generatedTargets)
-            console.log('[MEASUREMENT] Generated target_distances from DB:', targetDistances)
-            console.log('[MEASUREMENT] Found', measurementsResult.data.length, 'measurements:', 
-              measurementsResult.data.map(m => `${m.measurement_name}=${m.target_value}cm`).join(', '))
-          } else {
-            console.log('[MEASUREMENT] WARNING: No measurement values found in database for this article/size')
-          }
-        }
+      // Parse annotation_data JSON - use 'any' because format varies
+      let annotationData: {
+        keypoints: any  // Can be string, array of objects, or array of arrays
+        target_distances?: Record<string, number> | string
+        placement_box?: any  // Can be string or object
       }
 
-      // Validate annotation has required data - prefer keypoints_pixels for measurement system
-      if (!annotation.keypoints_pixels && !annotation.annotations) {
-        setError(`No annotation points found for ${articleStyle} size ${selectedSize}. Please create annotation in the web app first.`)
-        return
-      }
-
-      // Parse and validate keypoints count
-      let keypointsCount = 0
       try {
-        if (annotation.keypoints_pixels) {
-          const kp = typeof annotation.keypoints_pixels === 'string' 
-            ? JSON.parse(annotation.keypoints_pixels) 
-            : annotation.keypoints_pixels
-          keypointsCount = Array.isArray(kp) ? kp.length : 0
-        }
+        annotationData = typeof dbAnnotation.annotation_data === 'string'
+          ? JSON.parse(dbAnnotation.annotation_data)
+          : dbAnnotation.annotation_data
       } catch (e) {
-        console.error('[MEASUREMENT] Failed to parse keypoints:', e)
-      }
-
-      if (keypointsCount < 2) {
-        setError(`Insufficient annotation points (${keypointsCount}) for ${articleStyle} size ${selectedSize}. Need at least 2 points for measurement.`)
+        console.error('[MEASUREMENT] Failed to parse annotation_data:', e)
+        setError('Failed to parse annotation data. Please re-upload the annotation.')
         return
       }
 
-      if (!annotation.image_data) {
-        setError(`Reference image not found for ${articleStyle} size ${selectedSize}. Please re-capture the annotation.`)
+      console.log('[MEASUREMENT] Parsed annotation_data:', annotationData)
+      console.log('[MEASUREMENT] Keypoints type:', typeof annotationData.keypoints)
+      console.log('[MEASUREMENT] Keypoints sample:', JSON.stringify(annotationData.keypoints?.slice?.(0, 2)))
+      console.log('[MEASUREMENT] Placement box:', annotationData.placement_box)
+
+      // Parse keypoints - handle multiple formats
+      let keypointsPixels: number[][] = []
+
+      if (annotationData.keypoints) {
+        if (typeof annotationData.keypoints === 'string') {
+          // Format: "x1 y1 x2 y2 ..." or "[[x1,y1],[x2,y2],...]" 
+          const kpStr = annotationData.keypoints.trim()
+          if (kpStr.startsWith('[')) {
+            // JSON string
+            const parsed = JSON.parse(kpStr)
+            keypointsPixels = parsed.map((kp: any) =>
+              Array.isArray(kp) ? [Number(kp[0]), Number(kp[1])] : [Number(kp.x), Number(kp.y)]
+            )
+          } else {
+            // Space-separated: "x1 y1 x2 y2 ..."
+            const nums = kpStr.split(/\s+/).map(Number)
+            for (let i = 0; i < nums.length - 1; i += 2) {
+              keypointsPixels.push([nums[i], nums[i + 1]])
+            }
+          }
+        } else if (Array.isArray(annotationData.keypoints)) {
+          // Array format - could be [{x,y}] or [[x,y]]
+          keypointsPixels = annotationData.keypoints.map((kp: any) => {
+            if (Array.isArray(kp)) {
+              return [Number(kp[0]), Number(kp[1])]
+            } else if (typeof kp === 'object' && kp !== null) {
+              return [Number(kp.x), Number(kp.y)]
+            }
+            return [0, 0]
+          })
+        }
+      }
+
+      console.log('[MEASUREMENT] Converted keypoints:', keypointsPixels.length, 'points')
+      console.log('[MEASUREMENT] First 3 keypoints:', keypointsPixels.slice(0, 3))
+
+      // Validate keypoints
+      if (keypointsPixels.length < 2) {
+        setError(`Insufficient keypoints (${keypointsPixels.length}). Need at least 2 points for measurement.`)
         return
       }
 
-      // Start the Python measurement process via Electron IPC with database annotation
+      // Parse placement_box - handle multiple formats
+      let placementBox: number[] | null = null
+      if (annotationData.placement_box) {
+        const pb = annotationData.placement_box
+        if (typeof pb === 'string') {
+          // Format: "x1 y1 x2 y2" or "x y width height"
+          const nums = pb.trim().split(/\s+/).map(Number)
+          if (nums.length >= 4) {
+            placementBox = nums.slice(0, 4)
+          }
+          console.log('[MEASUREMENT] Parsed placement_box from string:', placementBox)
+        } else if (typeof pb === 'object' && pb !== null) {
+          if ('width' in pb && 'height' in pb) {
+            // Format: {x, y, width, height}
+            placementBox = [pb.x, pb.y, pb.x + pb.width, pb.y + pb.height]
+          } else if (Array.isArray(pb)) {
+            // Format: [x1, y1, x2, y2]
+            placementBox = pb.map(Number)
+          }
+          console.log('[MEASUREMENT] Parsed placement_box from object:', placementBox)
+        }
+      }
+
+      // ============== Fetch target_distances from measurements table ==============
+      let targetDistances: Record<string, number> = {}
+
+      // Get measurements from database (same logic as before)
+      const articleResult = await window.database.query<{ id: number }>(
+        `SELECT id FROM articles WHERE article_style = ? LIMIT 1`,
+        [articleStyle]
+      )
+
+      if (articleResult.success && articleResult.data && articleResult.data.length > 0) {
+        const articleId = articleResult.data[0].id
+
+        const measurementsResult = await window.database.query<{
+          measurement_id: number,
+          measurement_name: string,
+          target_value: number
+        }>(
+          `SELECT m.id as measurement_id, m.measurement as measurement_name, ms.value as target_value
+           FROM measurements m 
+           JOIN measurement_sizes ms ON m.id = ms.measurement_id 
+           WHERE m.article_id = ? AND ms.size = ?
+           ORDER BY m.id`,
+          [articleId, selectedSize]
+        )
+
+        if (measurementsResult.success && measurementsResult.data && measurementsResult.data.length > 0) {
+          measurementsResult.data.forEach((m, index) => {
+            targetDistances[String(index + 1)] = Number(m.target_value)
+          })
+          console.log('[MEASUREMENT] Got target_distances from measurements table:', targetDistances)
+        } else {
+          // Fallback to annotation_data.target_distances if available
+          const td = annotationData.target_distances
+          if (typeof td === 'string') {
+            try { targetDistances = JSON.parse(td) } catch { targetDistances = {} }
+          } else {
+            targetDistances = td || {}
+          }
+          console.log('[MEASUREMENT] Using annotation target_distances:', targetDistances)
+        }
+      } else {
+        const td = annotationData.target_distances
+        if (typeof td === 'string') {
+          try { targetDistances = JSON.parse(td) } catch { targetDistances = {} }
+        } else {
+          targetDistances = td || {}
+        }
+        console.log('[MEASUREMENT] Article not found, using annotation target_distances:', targetDistances)
+      }
+
+      // ============== Fetch reference image from Laravel API via IPC (bypasses CORS) ==============
+      console.log('[MEASUREMENT] Fetching reference image via IPC:', articleStyle, selectedSize)
+
+      let imageData: string | null = null
+      let imageMimeType = 'image/jpeg'
+
+      try {
+        const imageResult = await window.measurement.fetchLaravelImage(articleStyle, selectedSize)
+
+        if (imageResult.status === 'success' && imageResult.data) {
+          imageData = imageResult.data // Already includes data:image/...;base64, prefix
+          imageMimeType = imageResult.mime_type || 'image/jpeg'
+          console.log('[MEASUREMENT] Fetched reference image from Laravel API via IPC')
+          console.log('[MEASUREMENT] Image dimensions from API:', imageResult.width, 'x', imageResult.height)
+        } else {
+          throw new Error(imageResult.message || 'Invalid image response from API')
+        }
+      } catch (err) {
+        console.error('[MEASUREMENT] Failed to fetch reference image:', err)
+        setError(`Failed to fetch reference image from server: ${err instanceof Error ? err.message : String(err)}`)
+        return
+      }
+
+      // ============== Save files to temp_measure folder ==============
+      console.log('[MEASUREMENT] Saving files to temp_measure folder...')
+
+      try {
+        const saveResult = await window.measurement.saveTempFiles({
+          keypoints: keypointsPixels,
+          target_distances: targetDistances,
+          placement_box: placementBox,
+          image_width: dbAnnotation.image_width,
+          image_height: dbAnnotation.image_height,
+          image_base64: imageData!
+        })
+
+        if (saveResult.status === 'success') {
+          console.log('[MEASUREMENT] Files saved to temp_measure:')
+          console.log('  - JSON:', saveResult.jsonPath)
+          console.log('  - Image:', saveResult.imagePath)
+        } else {
+          console.error('[MEASUREMENT] Failed to save temp files:', saveResult.message)
+        }
+      } catch (err) {
+        console.error('[MEASUREMENT] Error saving temp files:', err)
+        // Continue with measurement even if file saving fails
+      }
+
+      // ============== Start measurement with fetched data ==============
+      console.log('[MEASUREMENT] Starting measurement with:')
+      console.log('  - Keypoints:', keypointsPixels.length)
+      console.log('  - Target distances:', Object.keys(targetDistances).length)
+      console.log('  - Image dimensions:', dbAnnotation.image_width, 'x', dbAnnotation.image_height)
+
       const result = await window.measurement.start({
         annotation_name: selectedSize,
         article_style: articleStyle,
         side: 'front',
-        // Pass measurement-ready data from database (use generated targetDistances if DB was null)
-        keypoints_pixels: annotation.keypoints_pixels || null,
-        target_distances: targetDistances || null,
-        placement_box: annotation.placement_box || null,
-        image_width: annotation.image_width || null,
-        image_height: annotation.image_height || null,
-        // Fallback: also pass percentage annotations for conversion if keypoints_pixels not available
-        annotation_data: annotation.annotations,
-        image_data: annotation.image_data,
-        image_mime_type: annotation.image_mime_type || 'image/jpeg'
+        keypoints_pixels: JSON.stringify(keypointsPixels),
+        target_distances: JSON.stringify(targetDistances),
+        placement_box: placementBox ? JSON.stringify(placementBox) : undefined,
+        image_width: dbAnnotation.image_width,
+        image_height: dbAnnotation.image_height,
+        annotation_data: undefined,
+        image_data: imageData!,
+        image_mime_type: imageMimeType
       })
 
       if (result.status === 'success') {
         setIsMeasurementEnabled(true)
         setIsPollingActive(true) // Start live polling
         setError(null)
+        console.log('[MEASUREMENT] Measurement started successfully!')
       } else {
         setError(result.message || 'Failed to start camera system')
       }
@@ -948,32 +1069,31 @@ export function ArticlesList() {
   const handleTestAnnotationMeasurement = async () => {
     try {
       console.log('[TEST] Starting measurement with TEST ANNOTATION from testjson folder...')
-      
+
       // Keypoints and target distances from testjson/annotation_test.json
       // These are for the 5488x3672 reference image (matches camera native resolution)
       const TEST_WIDTH = 5488
       const TEST_HEIGHT = 3672
-      
+
+      // Keypoints and target distances from testjson/annotation_data.json (SYNCED!)
       const testKeypoints = [
-        [1741, 1386], [1666, 2085], [3348, 1386], [3420, 2065],
-        [172, 1997], [360, 1890], [1822, 3010], [3297, 2970],
-        [4691, 1833], [4815, 1935], [180, 1997], [262, 2207],
-        [2230, 1199], [2821, 1199], [1698, 1296], [2199, 1098],
-        [2843, 1120], [3366, 1284], [1869, 3197], [3220, 3146]
+        [1806, 1318], [1710, 2024], [3395, 1359], [3465, 2045],
+        [2280, 1144], [2895, 1173], [1809, 2924], [3308, 2945],
+        [2268, 1062], [2225, 3073], [229, 1917], [323, 2135],
+        [3410, 1285], [4849, 2061]
       ]
-      
+
       const testTargetDistances = {
-        "1": 37.64317350838128,
-        "2": 36.60339138534189,
-        "3": 11.536302812910455,
-        "4": 79.10898847829691,
-        "5": 5.149846703002018,
-        "6": 12.071405982636598,
-        "7": 31.59187822847334,
-        "8": 28.72608060969501,
-        "9": 29.364941578781927,
-        "10": 72.49463243526145
+        "1": 20.8524686252755,
+        "2": 20.181240578402498,
+        "3": 18.019047989259654,
+        "4": 43.87601480642671,
+        "5": 58.90287103526992,
+        "6": 6.9748861675833,
+        "7": 47.87395450078443
       }
+
+      const testPlacementBox = [133, 995, 4903, 3197]
 
       console.log('[TEST] Test annotation:', testKeypoints.length, 'keypoints,', Object.keys(testTargetDistances).length, 'target distances')
       console.log('[TEST] Designed for image dimensions:', TEST_WIDTH, 'x', TEST_HEIGHT)
@@ -981,10 +1101,10 @@ export function ArticlesList() {
       // Load reference image from testjson folder via IPC
       let imageData: string | null = null
       const imageMimeType = 'image/jpeg'
-      
+
       // Request the test image from Electron main process
       const testImageResult = await window.measurement.loadTestImage('testjson/reference_image.jpg')
-      
+
       if (testImageResult.status === 'success' && testImageResult.data) {
         imageData = testImageResult.data
         console.log('[TEST] Loaded test reference image from testjson/reference_image.jpg')
@@ -992,13 +1112,13 @@ export function ArticlesList() {
       } else {
         console.log('[TEST] Could not load test image:', testImageResult.message)
         console.log('[TEST] Falling back to database image...')
-        
+
         // Fallback: try to get image from database (if any article is selected)
-        const articleStyle = jobCardSummary?.article_style || 
-                            articles.find(a => a.id === selectedArticleId)?.article_style
-        
+        const articleStyle = jobCardSummary?.article_style ||
+          articles.find(a => a.id === selectedArticleId)?.article_style
+
         if (articleStyle && selectedSize) {
-          const imageResult = await window.database.query<{ 
+          const imageResult = await window.database.query<{
             image_data: string
             image_mime_type: string
           }>(
@@ -1026,7 +1146,7 @@ export function ArticlesList() {
         side: 'front',
         keypoints_pixels: JSON.stringify(testKeypoints),
         target_distances: JSON.stringify(testTargetDistances),
-        placement_box: JSON.stringify([]),
+        placement_box: JSON.stringify(testPlacementBox),
         image_width: TEST_WIDTH,
         image_height: TEST_HEIGHT,
         annotation_data: undefined,
@@ -1053,7 +1173,7 @@ export function ArticlesList() {
   const handleCompleteMeasurement = async () => {
     try {
       console.log('[COMPLETE] Completing measurement...')
-      
+
       // Fetch final live measurements before stopping
       const finalResult = await window.measurement.getLiveResults()
       if (finalResult.status === 'success' && finalResult.data && finalResult.data.measurements) {
@@ -1061,7 +1181,7 @@ export function ArticlesList() {
           id: number
           actual_cm: number
         }>
-        
+
         // Update measured values with final readings
         setMeasuredValues(prev => {
           const newValues = { ...prev }
@@ -1101,10 +1221,10 @@ export function ArticlesList() {
       console.log('[SAVE] Missing PO article ID or size')
       return false
     }
-    
+
     setIsSaving(true)
     console.log('[SAVE] Saving measurements for PO Article:', selectedPOArticleId, 'Size:', selectedSize)
-    
+
     try {
       let savedCount = 0
       for (const spec of measurementSpecs) {
@@ -1133,7 +1253,7 @@ export function ArticlesList() {
         savedCount++
         console.log(`[SAVE] Saved ${spec.code}: value=${value}, status=${status}`)
       }
-      
+
       console.log(`[SAVE] Successfully saved ${savedCount} measurements`)
       return true
     } catch (err) {
@@ -1178,14 +1298,14 @@ export function ArticlesList() {
       // Move to next article in same PO
       const nextIndex = currentPOArticleIndex + 1
       const nextArticle = poArticles[nextIndex]
-      
+
       setCurrentPOArticleIndex(nextIndex)
       setSelectedPOArticleId(nextArticle.id)
       setMeasuredValues({})
       setError(null)
-      
+
       console.log('[NEXT] Moving to next PO article:', nextArticle.article_style)
-      
+
       // Check if this article already has measurements
       await loadExistingMeasurements(nextArticle.id)
     } else {
@@ -1198,12 +1318,12 @@ export function ArticlesList() {
   // Reset the entire page state for selecting a new article while keeping operator session
   const handleResetForNewArticle = () => {
     console.log('[RESET] Resetting ALL selections for new article')
-    
+
     // Stop any active measurement
     if (isPollingActive) {
       window.measurement.stop().catch(console.error)
     }
-    
+
     // Reset ALL selection states
     setSelectedBrandId(null)
     setSelectedArticleTypeId(null)
@@ -1211,7 +1331,7 @@ export function ArticlesList() {
     setSelectedPOId(null)
     setSelectedPOArticleId(null)
     setSelectedSize(null)
-    
+
     // Reset lists
     setArticleTypes([])
     setArticles([])
@@ -1219,30 +1339,30 @@ export function ArticlesList() {
     setPOArticles([])
     setAvailableSizes([])
     setCurrentPOArticleIndex(0)
-    
+
     // Reset job card
     setJobCardSummary(null)
-    
+
     // Reset measurement states
     setMeasurementSpecs([])
     setMeasuredValues({})
     setEditableTols({})
-    
+
     // Reset lifecycle states
     setIsPollingActive(false)
     setMeasurementComplete(false)
     setIsMeasurementEnabled(false)
-    
+
     // Clear errors
     setError(null)
-    
+
     // Notify user
     console.log('[RESET] ALL selections cleared - Ready for new article selection')
   }
 
   const handlePreviousArticle = async () => {
     console.log('[BACK] Going to previous article...')
-    
+
     // Stop any active measurement
     if (isPollingActive) {
       try {
@@ -1265,14 +1385,14 @@ export function ArticlesList() {
     if (currentPOArticleIndex > 0) {
       const prevIndex = currentPOArticleIndex - 1
       const prevArticle = poArticles[prevIndex]
-      
+
       setCurrentPOArticleIndex(prevIndex)
       setSelectedPOArticleId(prevArticle.id)
       setMeasuredValues({})
       setError(null)
-      
+
       console.log('[BACK] Navigating to previous article:', prevArticle.article_style)
-      
+
       // Load existing measurements for the previous article
       await loadExistingMeasurements(prevArticle.id)
     }
@@ -1281,10 +1401,10 @@ export function ArticlesList() {
   // Load existing measurement results from database
   const loadExistingMeasurements = async (poArticleId: number) => {
     if (!selectedSize) return
-    
+
     try {
       console.log('[LOAD] Loading existing measurements for PO Article:', poArticleId, 'Size:', selectedSize)
-      
+
       const sql = `
         SELECT mr.measurement_id, mr.measured_value, mr.status, mr.tol_plus, mr.tol_minus
         FROM measurement_results mr
@@ -1296,21 +1416,21 @@ export function ArticlesList() {
         measured_value: number | null
         status: string
       }>(sql, [poArticleId, selectedSize])
-      
+
       if (result.success && result.data && result.data.length > 0) {
         console.log('[LOAD] Found', result.data.length, 'existing measurements')
-        
+
         // Restore measured values
         const values: Record<number, string> = {}
-        
+
         result.data.forEach(row => {
           if (row.measured_value !== null) {
             values[row.measurement_id] = row.measured_value.toFixed(2)
           }
         })
-        
+
         setMeasuredValues(values)
-        
+
         // Mark as complete if all measurements have values
         const allComplete = measurementSpecs.every(spec => values[spec.id] && values[spec.id] !== '')
         if (allComplete) {
@@ -1334,7 +1454,7 @@ export function ArticlesList() {
         console.error('Failed to stop measurement:', err)
       }
     }
-    
+
     // Save before going back
     await saveMeasurements()
 
@@ -1371,13 +1491,13 @@ export function ArticlesList() {
     setSelectedPOArticleId(null)
     setMeasurementSpecs([])
     setMeasuredValues({})
-    
+
     const article = articles.find(a => a.id === articleId)
     if (article) {
       setSelectedArticleTypeId(article.article_type_id)
       // Load available sizes for this article from database
       const sizesLoaded = await fetchAvailableSizesAndReturn(article.id)
-      
+
       // Don't auto-select size or auto-load measurements - let user choose
       // Just show available sizes and wait for user to select
       if (sizesLoaded && sizesLoaded.length > 0) {
@@ -1445,7 +1565,7 @@ export function ArticlesList() {
       `
       const result = await window.database.query<MeasurementSpec & { article_id?: number }>(directQuery, [articleId, size])
       console.log('[DIRECT_LOAD] Query result:', result.data?.length || 0, 'measurements')
-      
+
       if (result.success && result.data && result.data.length > 0) {
         console.log('[DIRECT_LOAD] ✓ Loaded measurements:', result.data.map((m: MeasurementSpec) => m.code).join(', '))
         setMeasurementSpecs(result.data as MeasurementSpec[])
@@ -1485,7 +1605,7 @@ export function ArticlesList() {
     console.log('[SELECTION] Current selectedPOArticleId:', selectedPOArticleId)
     setSelectedSize(size)
     setMeasuredValues({})
-    
+
     // Load measurements for the new size
     // Priority: use selectedArticleId if available (most reliable), otherwise use selectedPOArticleId
     if (selectedArticleId) {
@@ -1498,159 +1618,224 @@ export function ArticlesList() {
     }
   }
 
+  // Fetch calibration status from Python API
+  const fetchCalibrationStatus = async () => {
+    try {
+      const result = await window.measurement.getCalibrationStatus()
+      if (result.status === 'success' && result.data) {
+        setCalibrationStatus(result.data)
+        console.log('[CALIBRATION] Status:', result.data.calibrated ? 'Calibrated' : 'Not calibrated')
+        if (result.data.pixels_per_cm) {
+          console.log('[CALIBRATION] Scale:', result.data.pixels_per_cm.toFixed(2), 'px/cm')
+        }
+      }
+    } catch (err) {
+      console.error('[CALIBRATION] Failed to fetch status:', err)
+    }
+  }
+
+  // Start camera calibration
+  const handleStartCalibration = async () => {
+    try {
+      setIsCalibrating(true)
+      setError(null)
+      console.log('[CALIBRATION] Starting calibration process...')
+
+      const result = await window.measurement.startCalibration()
+
+      if (result.status === 'success') {
+        console.log('[CALIBRATION] Calibration window opened. Follow on-screen instructions.')
+        // Poll for calibration status every 2 seconds
+        const pollInterval = setInterval(async () => {
+          const statusResult = await window.measurement.getCalibrationStatus()
+          if (statusResult.status === 'success' && statusResult.data) {
+            setCalibrationStatus(statusResult.data)
+            if (statusResult.data.calibrated) {
+              console.log('[CALIBRATION] Calibration completed successfully!')
+              setIsCalibrating(false)
+              clearInterval(pollInterval)
+            }
+          }
+        }, 2000)
+
+        // Stop polling after 5 minutes (timeout)
+        setTimeout(() => {
+          clearInterval(pollInterval)
+          setIsCalibrating(false)
+        }, 300000)
+      } else {
+        setError(result.message || 'Failed to start calibration')
+        setIsCalibrating(false)
+      }
+    } catch (err) {
+      console.error('[CALIBRATION] Error:', err)
+      setError('Calibration service unavailable')
+      setIsCalibrating(false)
+    }
+  }
+
+  // Fetch calibration status on mount
+  useEffect(() => {
+    fetchCalibrationStatus()
+  }, [])
+
   return (
-    <div className="h-full w-full py-1 flex flex-col overflow-hidden">
-      {/* Error Message */}
+    <div className="h-full w-full flex flex-col overflow-hidden bg-surface">
+      {/* Error Message - Touch Friendly */}
       {error && (
-        <div className="mb-2 bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-lg flex items-center gap-2 text-sm">
-          <svg className="w-4 h-4 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+        <div className="mx-4 mt-3 bg-error-light border-2 border-error/20 text-error px-5 py-4 rounded-xl flex items-center gap-4">
+          <svg className="w-7 h-7 shrink-0" fill="currentColor" viewBox="0 0 20 20">
             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
           </svg>
-          <span>{error}</span>
-          <button onClick={() => setError(null)} className="ml-auto text-red-500 hover:text-red-700">
-            <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+          <span className="text-touch-base font-semibold flex-1">{error}</span>
+          <button
+            onClick={() => setError(null)}
+            className="min-w-[48px] min-h-[48px] flex items-center justify-center rounded-xl hover:bg-error/10 transition-colors"
+          >
+            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
             </svg>
           </button>
         </div>
       )}
 
-      {/* Main 2-Column Layout: Left = Selection Grid, Right = Measurement Table */}
-      <div className="flex gap-1 flex-1 min-h-0 bg-transparent">
+      {/* Main 2-Column Layout - No Scroll Except Measurement Table */}
+      <div className="flex gap-4 flex-1 min-h-0 p-4 overflow-hidden">
 
-        {/* LEFT SIDE - Selection Grid (4-box layout) */}
-        <div className="w-[60%] grid grid-cols-2 gap-2 auto-rows-min order-1 pt-1">
-          {/* TOP LEFT - Comprehensive Selection (Brand, Style, Type, PO) */}
-          <div className="card p-5">
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                {/* Brand */}
-                <div>
-                  <label className="block mb-2">Brand</label>
-                  <select
-                    value={selectedBrandId || ''}
-                    onChange={(e) => handleBrandChange(e.target.value ? Number(e.target.value) : null)}
-                    className="input-field"
-                  >
-                    <option value="">Select Brand</option>
-                    {brands.map((brand) => (
-                      <option key={brand.id} value={brand.id}>{brand.name}</option>
-                    ))}
-                  </select>
-                </div>
+        {/* LEFT SIDE - Brand + Article Selection + Size */}
+        <div className="w-[50%] flex flex-col gap-4 overflow-hidden">
 
-                {/* Article Type */}
-                <div>
-                  <label className="block mb-2">Article Type</label>
-                  <select
-                    value={selectedArticleTypeId || ''}
-                    onChange={(e) => handleArticleTypeChange(e.target.value ? Number(e.target.value) : null)}
-                    disabled={!selectedBrandId}
-                    className="input-field"
-                  >
-                    <option value="">Select Type</option>
-                    {articleTypes.map((type) => (
-                      <option key={type.id} value={type.id}>{type.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Article Style */}
-              <div>
-                <label className="block mb-2">Article Style</label>
-                <select
-                  value={selectedArticleId || ''}
-                  onChange={(e) => handleArticleChange(e.target.value ? Number(e.target.value) : null)}
-                  disabled={!selectedBrandId}
-                  className="input-field"
-                >
-                  <option value="">Select Article</option>
-                  {articles.map((article) => (
-                    <option key={article.id} value={article.id}>{article.article_style}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Purchase Order Selection */}
-              <div>
-                <label className="block mb-4">Purchase Order</label>
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {purchaseOrders.length === 0 ? (
-                    <span className="text-secondary text-xs italic">No orders available</span>
-                  ) : (
-                    purchaseOrders.slice(0, 8).map((po) => (
-                      <button
-                        key={po.id}
-                        onClick={() => setSelectedPOId(po.id)}
-                        className={`w-10 h-10 rounded-md border text-xs font-bold transition-all ${selectedPOId === po.id
-                          ? 'border-accent-active bg-primary text-white shadow-sm ring-1 ring-accent-active/20'
-                          : 'border-slate-200 bg-white text-secondary hover:border-slate-300 hover:bg-slate-50'
-                          }`}
-                        title={po.po_number}
-                      >
-                        {po.po_number.slice(-3)}
-                      </button>
-                    ))
-                  )}
-                </div>
-                {selectedPOId && (
-                  <p className="mt-3 text-[11px] text-accent-active font-bold flex items-center">
-                    <span className="w-1.5 h-1.5 rounded-full bg-accent-active mr-2"></span>
-                    ID: {purchaseOrders.find(p => p.id === selectedPOId)?.po_number}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* RIGHT COLUMN - Job Card Summary (Expanded Vertically) */}
-          <div className="row-span-2 card p-5">
-            <h3 className="text-sm font-bold text-primary mb-4 border-b border-slate-100 pb-3 flex items-center">
-              <svg className="w-4 h-4 mr-2 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          {/* Brand Selection - Main Section */}
+          <div className="card p-4 shrink-0">
+            <h3 className="text-touch-lg font-bold text-primary mb-3 flex items-center gap-2">
+              <svg className="w-6 h-6 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
               </svg>
-              Job Card Summary
+              Select Brand
             </h3>
-            <div className="space-y-4 flex-1">
-              {[
-                { label: 'PO Number', value: jobCardSummary?.po_number },
-                { label: 'Brand', value: jobCardSummary?.brand_name },
-                { label: 'Style', value: jobCardSummary?.article_style },
-                { label: 'Type', value: jobCardSummary?.article_type_name },
-                { label: 'Origin', value: jobCardSummary?.country },
-              ].map((item, idx) => (
-                <div key={idx} className="pb-1">
-                  <label className="block mb-2">{item.label}</label>
-                  <div className="px-3 py-2 border border-slate-100 rounded bg-slate-50 font-bold text-primary text-xs tracking-tight">
-                    {item.value || '---'}
-                  </div>
-                </div>
-              ))}
-              <div className="flex-1 flex flex-col min-h-0">
-                <label className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block mb-1">Description</label>
-                <div className="flex-1 px-3 py-3 border border-slate-100 rounded bg-slate-50/50 text-slate-600 text-sm overflow-y-auto leading-relaxed min-h-[100px]">
-                  {jobCardSummary?.article_description || <span className="text-slate-300 italic">No description available</span>}
-                </div>
-              </div>
+            <div className="flex gap-4 overflow-x-auto scrollbar-hide py-2 px-2 -mx-2">
+              {brands.map((brand) => {
+                // Map brand names to logo files
+                const logoMap: Record<string, string> = {
+                  'nike': '/company logo/black-nike-logo-transparent-background-701751694777156f3ewilq1js.png',
+                  'adidas': '/company logo/Adidas_Logo.svg.png',
+                  'puma': '/company logo/puma.png',
+                  'reebok': '/company logo/Reebok_logo19.png',
+                  'new balance': '/company logo/New_Balance_logo.svg.png',
+                  'under armour': '/company logo/Under_Armour-Logo.wine.png',
+                  'champion': '/company logo/champian.jpg',
+                  'fila': '/company logo/fila-logo-design-history-and-evolution-kreafolk_94ed6bf4-6bfd-44f9-a60c-fd3f570e120e.webp',
+                }
+                const logoPath = logoMap[brand.name.toLowerCase()] || null
+
+                return (
+                  <button
+                    key={brand.id}
+                    onClick={() => handleBrandChange(brand.id)}
+                    className={`flex-shrink-0 h-28 w-36 p-3 rounded-xl border-3 transition-all duration-200 flex items-center justify-center bg-white brand-logo-bg ${selectedBrandId === brand.id
+                      ? 'border-primary shadow-xl shadow-primary/30 scale-105 ring-2 ring-primary/20'
+                      : 'border-slate-200 hover:border-secondary hover:shadow-lg hover:scale-102'
+                      }`}
+                    title={brand.name}
+                  >
+                    {logoPath ? (
+                      <img
+                        src={logoPath}
+                        alt={brand.name}
+                        className="w-full h-full object-contain"
+                      />
+                    ) : (
+                      <span className="text-3xl font-black text-primary">
+                        {brand.name.substring(0, 2).toUpperCase()}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          <div className="card p-5">
-            <label className="block mb-4">Size Selection</label>
+          {/* Article Type Selection - Button Pills */}
+          <div className="card p-6">
+            <h3 className="text-touch-2xl font-bold text-primary mb-5 flex items-center gap-3">
+              <svg className="w-8 h-8 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+              </svg>
+              Article Type
+            </h3>
+            {!selectedBrandId ? (
+              <div className="text-center py-6 text-slate-400 text-touch-lg italic">Select a brand first</div>
+            ) : articleTypes.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-touch-lg">No article types available</div>
+            ) : (
+              <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
+                {articleTypes.map((type) => (
+                  <button
+                    key={type.id}
+                    onClick={() => handleArticleTypeChange(type.id)}
+                    className={`flex-shrink-0 px-6 py-4 rounded-xl text-touch-lg font-bold transition-all duration-200 border-2 ${selectedArticleTypeId === type.id
+                      ? 'bg-secondary text-white border-secondary shadow-lg shadow-secondary/30'
+                      : 'bg-white text-primary border-slate-200 hover:border-secondary hover:text-secondary'
+                      }`}
+                  >
+                    {type.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Article Style Selection - Button Pills */}
+          <div className="card p-6">
+            <h3 className="text-touch-2xl font-bold text-primary mb-5 flex items-center gap-3">
+              <svg className="w-8 h-8 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              Article Style
+            </h3>
+            {!selectedBrandId ? (
+              <div className="text-center py-6 text-slate-400 text-touch-lg italic">Select a brand first</div>
+            ) : articles.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-touch-lg">No articles available</div>
+            ) : (
+              <div className="flex gap-3 overflow-x-auto scrollbar-hide pb-1">
+                {articles.map((article) => (
+                  <button
+                    key={article.id}
+                    onClick={() => handleArticleChange(article.id)}
+                    className={`flex-shrink-0 px-6 py-4 rounded-xl text-touch-lg font-bold transition-all duration-200 border-2 ${selectedArticleId === article.id
+                      ? 'bg-primary text-white border-primary shadow-lg shadow-primary/30'
+                      : 'bg-white text-primary border-slate-200 hover:border-primary hover:bg-surface-teal'
+                      }`}
+                  >
+                    {article.article_style}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Size Selection - Large Button Pills */}
+          <div className="card p-6 flex-1">
+            <h3 className="text-touch-2xl font-bold text-primary mb-5 flex items-center gap-3">
+              <svg className="w-8 h-8 text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+              </svg>
+              Size Selection
+            </h3>
             {availableSizes.length === 0 ? (
-              <div className="text-center py-4 text-slate-400 text-sm italic">
-                Select an article to load available sizes
+              <div className="text-center py-6 text-slate-400 text-touch-lg italic">
+                Select an article to load sizes
               </div>
             ) : (
-              <div className="grid grid-cols-4 gap-2 content-start pt-1">
+              <div className="flex gap-4 overflow-x-auto scrollbar-hide pb-1">
                 {availableSizes.map((size) => (
                   <button
                     key={size}
                     onClick={() => handleSizeChange(size)}
-                    className={`py-2 rounded-md border text-xs font-bold transition-all ${selectedSize === size
-                      ? 'border-accent-active bg-primary text-white shadow-sm ring-1 ring-accent-active/20'
-                      : 'border-slate-200 bg-white text-secondary hover:border-slate-300 hover:bg-slate-50'
+                    className={`flex-shrink-0 min-w-[80px] px-6 py-4 rounded-xl text-touch-xl font-black transition-all duration-200 border-3 ${selectedSize === size
+                      ? 'bg-secondary text-white border-secondary shadow-xl shadow-secondary/40 scale-110'
+                      : 'bg-white text-primary border-slate-200 hover:border-secondary hover:shadow-lg'
                       }`}
                   >
                     {size}
@@ -1661,156 +1846,128 @@ export function ArticlesList() {
           </div>
         </div>
 
-        {/* RIGHT SIDE - Live Measurement Table (7 columns, 24 rows) */}
-        <div className="w-[40%] card overflow-hidden order-2">
-          <div className="px-4 py-3 border-b border-slate-100 bg-slate-50/50 shrink-0">
-            <h3 className="text-sm font-bold text-primary flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-success"></span>
-              Live Measurement Table
-              <span className="ml-auto text-[10px] font-bold text-accent bg-accent/10 px-2 py-0.5 rounded-full uppercase">
-                Size: {selectedSize || 'Not Selected'}
+        {/* RIGHT SIDE - Live Measurement Table - NO HORIZONTAL SCROLL */}
+        <div className="w-[50%] card overflow-hidden flex flex-col">
+          <div className="px-4 py-3 border-b border-slate-200 bg-white shrink-0">
+            <h3 className="text-touch-xl font-bold text-primary flex items-center gap-3">
+              <span className={`w-4 h-4 rounded-full ${isPollingActive ? 'bg-success animate-pulse' : 'bg-slate-300'}`}></span>
+              Live Measurement
+              <span className="ml-auto text-touch-base font-bold text-white bg-accent px-4 py-2 rounded-lg">
+                {selectedSize || 'No Size'}
               </span>
             </h3>
           </div>
-          <div className="overflow-auto flex-1">
-            <table className="w-full text-sm table-zebra">
-              <thead className="bg-slate-50 sticky top-0 z-10">
+          <div className="overflow-y-auto overflow-x-hidden flex-1">
+            <table className="w-full text-touch-base">
+              <thead className="bg-surface-teal sticky top-0 z-10 border-b-2 border-primary/10">
                 <tr>
-                  <th className="px-3 py-2.5 text-left text-[10px] font-bold text-secondary uppercase tracking-wider">Code</th>
-                  <th className="px-3 py-2.5 text-left text-[10px] font-bold text-secondary uppercase tracking-wider">Measurement</th>
-                  <th className="px-3 py-2.5 text-center text-[10px] font-bold text-secondary uppercase tracking-wider">Spec</th>
-                  <th className="px-3 py-2.5 text-center text-[10px] font-bold text-secondary uppercase tracking-wider">Tol+</th>
-                  <th className="px-3 py-2.5 text-center text-[10px] font-bold text-secondary uppercase tracking-wider">Tol-</th>
-                  <th className="px-3 py-2.5 text-center text-[10px] font-bold text-secondary uppercase tracking-wider">Result</th>
-                  <th className="px-3 py-2.5 text-center text-[10px] font-bold text-secondary uppercase tracking-wider">Status</th>
+                  <th className="px-3 py-4 text-left text-touch-sm font-bold text-primary uppercase tracking-wide w-14">Code</th>
+                  <th className="px-3 py-4 text-left text-touch-sm font-bold text-primary uppercase tracking-wide">Measurement</th>
+                  <th className="px-3 py-4 text-center text-touch-sm font-bold text-primary uppercase tracking-wide w-16">Spec</th>
+                  <th className="px-3 py-4 text-center text-touch-sm font-bold text-primary uppercase tracking-wide w-28">Tol ±</th>
+                  <th className="px-3 py-4 text-center text-touch-sm font-bold text-primary uppercase tracking-wide w-18">Result</th>
+                  <th className="px-3 py-4 text-center text-touch-sm font-bold text-primary uppercase tracking-wide w-14">Pass</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
-                {/* Render measurement specs if available, otherwise show 24 empty rows */}
+              <tbody className="divide-y divide-slate-100">
+                {/* Render measurement specs if available, otherwise show empty state */}
                 {measurementSpecs.length > 0 ? (
                   measurementSpecs.map((spec) => {
-                    // Calculate status directly inline for each row
                     const status = calculateStatus(spec)
                     return (
                       <tr key={spec.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-3 py-2 font-mono text-[11px] font-bold text-primary">{spec.code}</td>
-                        <td className="px-3 py-2 text-slate-600 text-[12px] truncate max-w-[140px]" title={spec.measurement}>{spec.measurement}</td>
-                        <td className="px-3 py-2 text-center font-bold text-slate-800">{spec.expected_value}</td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-2 py-3 font-mono text-touch-sm font-bold text-primary">{spec.code}</td>
+                        <td className="px-2 py-3 text-touch-sm text-slate-600 truncate max-w-[120px]" title={spec.measurement}>{spec.measurement}</td>
+                        <td className="px-2 py-3 text-center font-bold text-slate-800 text-touch-base">{spec.expected_value}</td>
+
+                        {/* Tol± Column - SINGLE INPUT with touch arrows, applies to BOTH +/- */}
+                        <td className="px-2 py-3 text-center">
                           {measurementComplete || !isPollingActive ? (
-                            <div className="inline-flex items-center border border-slate-200 rounded overflow-hidden">
+                            <div className="inline-flex items-center gap-1 bg-surface-teal rounded-xl p-1">
+                              {/* Down Arrow */}
                               <button
                                 type="button"
-                                onClick={() => handleToleranceStep(spec.id, 'tol_plus', -0.1)}
-                                className="px-1 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-500 text-xs border-r border-slate-200"
-                              >−</button>
+                                onClick={() => {
+                                  const currentVal = parseFloat(editableTols[spec.id]?.tol_plus ?? spec.tol_plus.toString()) || 0
+                                  const newVal = Math.max(0, currentVal - 0.1).toFixed(1)
+                                  handleToleranceChange(spec.id, 'tol_plus', newVal)
+                                  handleToleranceChange(spec.id, 'tol_minus', newVal)
+                                }}
+                                className="w-9 h-9 flex items-center justify-center rounded-lg bg-white text-primary font-bold hover:bg-primary hover:text-white active:bg-primary-dark transition-all shadow-sm"
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </button>
+                              {/* Single Input */}
                               <input
                                 type="number"
                                 step="0.1"
                                 min="0"
                                 value={editableTols[spec.id]?.tol_plus ?? spec.tol_plus.toString()}
-                                onChange={(e) => handleToleranceChange(spec.id, 'tol_plus', e.target.value)}
-                                className="w-12 px-1 py-0.5 text-center text-xs font-semibold text-success focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                onChange={(e) => {
+                                  handleToleranceChange(spec.id, 'tol_plus', e.target.value)
+                                  handleToleranceChange(spec.id, 'tol_minus', e.target.value)
+                                }}
+                                className="w-14 h-9 px-2 text-center text-touch-base font-bold text-primary bg-white border-2 border-primary/20 rounded-lg focus:border-primary focus:ring-2 focus:ring-primary/20 focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                               />
+                              {/* Up Arrow */}
                               <button
                                 type="button"
-                                onClick={() => handleToleranceStep(spec.id, 'tol_plus', 0.1)}
-                                className="px-1 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-500 text-xs border-l border-slate-200"
-                              >+</button>
+                                onClick={() => {
+                                  const currentVal = parseFloat(editableTols[spec.id]?.tol_plus ?? spec.tol_plus.toString()) || 0
+                                  const newVal = (currentVal + 0.1).toFixed(1)
+                                  handleToleranceChange(spec.id, 'tol_plus', newVal)
+                                  handleToleranceChange(spec.id, 'tol_minus', newVal)
+                                }}
+                                className="w-9 h-9 flex items-center justify-center rounded-lg bg-white text-primary font-bold hover:bg-primary hover:text-white active:bg-primary-dark transition-all shadow-sm"
+                              >
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+                                </svg>
+                              </button>
                             </div>
                           ) : (
-                            <span className="text-success font-semibold">+{spec.tol_plus}</span>
+                            <span className="inline-block px-3 py-1.5 bg-surface-teal rounded-lg text-touch-base font-bold text-primary">
+                              ±{spec.tol_plus}
+                            </span>
                           )}
                         </td>
-                        <td className="px-3 py-2 text-center">
-                          {measurementComplete || !isPollingActive ? (
-                            <div className="inline-flex items-center border border-slate-200 rounded overflow-hidden">
-                              <button
-                                type="button"
-                                onClick={() => handleToleranceStep(spec.id, 'tol_minus', -0.1)}
-                                className="px-1 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-500 text-xs border-r border-slate-200"
-                              >−</button>
-                              <input
-                                type="number"
-                                step="0.1"
-                                min="0"
-                                value={editableTols[spec.id]?.tol_minus ?? spec.tol_minus.toString()}
-                                onChange={(e) => handleToleranceChange(spec.id, 'tol_minus', e.target.value)}
-                                className="w-12 px-1 py-0.5 text-center text-xs font-semibold text-error focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleToleranceStep(spec.id, 'tol_minus', 0.1)}
-                                className="px-1 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-500 text-xs border-l border-slate-200"
-                              >+</button>
-                            </div>
-                          ) : (
-                            <span className="text-error font-semibold">-{spec.tol_minus}</span>
-                          )}
+
+                        {/* Result - READ ONLY */}
+                        <td className="px-2 py-3 text-center">
+                          <div className={`px-2 py-1.5 rounded text-touch-base font-bold ${measuredValues[spec.id]
+                            ? status === 'PASS' ? 'bg-success/10 text-success' : status === 'FAIL' ? 'bg-error/10 text-error' : 'bg-slate-100 text-primary'
+                            : 'bg-slate-50 text-slate-300'
+                            }`}>
+                            {measuredValues[spec.id] || '--'}
+                          </div>
                         </td>
-                        <td className="px-3 py-2 text-center">
-                          {isPollingActive ? (
-                            // During live measurement - show live value with indicator
-                            <div className="relative">
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                value={measuredValues[spec.id] || ''}
-                                onChange={(e) => handleMeasuredValueChange(spec.id, e.target.value)}
-                                placeholder="--"
-                                className="w-16 px-1.5 py-1 border border-success rounded text-center text-xs font-bold text-primary bg-success/5 focus:outline-none focus:ring-2 focus:ring-success/20 transition-all animate-pulse"
-                                readOnly
-                              />
-                              <span className="absolute -top-1 -right-1 w-2 h-2 bg-success rounded-full animate-ping"></span>
-                            </div>
-                          ) : (
-                            // When not measuring - editable field with increment/decrement
-                            <div className="inline-flex items-center border border-slate-200 rounded overflow-hidden">
-                              <button
-                                type="button"
-                                onClick={() => handleMeasuredValueStep(spec.id, -0.5)}
-                                className="px-1 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-500 text-xs border-r border-slate-200"
-                              >−</button>
-                              <input
-                                type="number"
-                                step="0.5"
-                                min="0"
-                                value={measuredValues[spec.id] || ''}
-                                onChange={(e) => handleMeasuredValueChange(spec.id, e.target.value)}
-                                placeholder="0.00"
-                                className="w-14 px-1 py-0.5 text-center text-xs font-bold text-primary focus:outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleMeasuredValueStep(spec.id, 0.5)}
-                                className="px-1 py-0.5 bg-slate-50 hover:bg-slate-100 text-slate-500 text-xs border-l border-slate-200"
-                              >+</button>
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-3 py-2 text-center">
+
+                        {/* Status */}
+                        <td className="px-2 py-3 text-center">
                           {status === 'PASS' && (
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-success/10 text-success">
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-success/10 text-success">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
                               </svg>
                             </span>
                           )}
                           {status === 'FAIL' && (
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-error/10 text-error">
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-error/10 text-error">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M6 18L18 6M6 6l12 12" />
                               </svg>
                             </span>
                           )}
                           {status === 'PENDING' && isPollingActive && (
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-500">
-                              <span className="w-2 h-2 bg-current rounded-full animate-pulse"></span>
+                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-500">
+                              <span className="w-3 h-3 bg-current rounded-full animate-pulse"></span>
                             </span>
                           )}
                           {status === 'PENDING' && !isPollingActive && (
-                            <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 text-slate-300">
-                              <span className="w-1.5 h-0.5 bg-current rounded-full"></span>
+                            <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-slate-100 text-slate-300">
+                              <span className="w-2 h-0.5 bg-current rounded-full"></span>
                             </span>
                           )}
                         </td>
@@ -1818,109 +1975,73 @@ export function ArticlesList() {
                     )
                   })
                 ) : (
-                  [...Array(24)].map((_, index) => (
-                    <tr key={`empty-${index}`} className="opacity-20">
-                      <td className="px-3 py-2 text-slate-300"></td>
-                      <td className="px-3 py-2 text-slate-300"></td>
-                      <td className="px-3 py-2 text-center text-slate-300"></td>
-                      <td className="px-3 py-2 text-center text-slate-300"></td>
-                      <td className="px-3 py-2 text-center text-slate-300"></td>
-                      <td className="px-3 py-2 text-center">
-                        <div className="w-16 h-6 bg-slate-50 border border-slate-200/50 rounded-sm mx-auto"></div>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <div className="w-5 h-5 rounded-full bg-slate-50 border border-slate-200/50 mx-auto"></div>
-                      </td>
+                  [...Array(12)].map((_, index) => (
+                    <tr key={`empty-${index}`} className="opacity-30">
+                      <td className="px-2 py-3"><div className="h-5 bg-slate-100 rounded w-10"></div></td>
+                      <td className="px-2 py-3"><div className="h-5 bg-slate-100 rounded w-20"></div></td>
+                      <td className="px-2 py-3 text-center"><div className="h-5 bg-slate-100 rounded w-10 mx-auto"></div></td>
+                      <td className="px-2 py-3 text-center"><div className="h-10 bg-slate-100 rounded w-12 mx-auto"></div></td>
+                      <td className="px-2 py-3 text-center"><div className="h-8 bg-slate-100 rounded w-12 mx-auto"></div></td>
+                      <td className="px-2 py-3 text-center"><div className="h-8 w-8 bg-slate-100 rounded-full mx-auto"></div></td>
                     </tr>
                   ))
                 )}
               </tbody>
             </table>
           </div>
+
+          {/* Measurement Action Button - Fixed at bottom */}
+          <div className="px-4 py-4 border-t border-slate-200 bg-white shrink-0">
+            {!isMeasurementEnabled ? (
+              <div className="flex gap-3">
+                <button
+                  onClick={handleStartMeasurement}
+                  disabled={!selectedSize}
+                  className={`flex-1 py-4 rounded-xl text-touch-lg font-bold transition-all flex items-center justify-center gap-3 ${selectedSize
+                    ? 'bg-primary text-white hover:bg-primary-dark shadow-lg shadow-primary/30'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                  Start Measurement
+                </button>
+                <button
+                  onClick={handleTestAnnotationMeasurement}
+                  disabled={!selectedSize}
+                  className={`px-6 py-4 rounded-xl text-touch-lg font-bold transition-all flex items-center justify-center gap-2 ${selectedSize
+                    ? 'bg-secondary text-white hover:bg-secondary-dark shadow-lg shadow-secondary/30'
+                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                    }`}
+                  title="Test with sample data"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  Test
+                </button>
+              </div>
+            ) : isPollingActive ? (
+              <button
+                onClick={handleCompleteMeasurement}
+                className="w-full py-4 rounded-xl text-touch-lg font-bold bg-success text-white hover:bg-success/90 transition-all flex items-center justify-center gap-3 shadow-lg shadow-success/30"
+              >
+                <span className="w-3 h-3 rounded-full bg-white animate-pulse"></span>
+                Complete Measurement
+              </button>
+            ) : (
+              <div className="w-full py-4 rounded-xl text-touch-lg font-bold bg-success-light text-success border-2 border-success/30 flex items-center justify-center gap-3">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                </svg>
+                Measurement Complete
+              </div>
+            )}
+          </div>
         </div>
-      </div>
-
-      {/* Fixed Bottom Action Bar - Industry 4.0 */}
-      <div className="mt-auto pt-4 border-t border-slate-100 flex justify-center items-center gap-6 pb-2">
-        {/* Back Article Button */}
-        <button
-          onClick={isMeasurementEnabled ? handlePreviousArticle : handleBack}
-          disabled={isSaving || (isMeasurementEnabled && currentPOArticleIndex === 0)}
-          className="btn-industrial border border-slate-200 text-slate-600 bg-white hover:bg-slate-50 flex items-center min-w-[160px] justify-center"
-        >
-          <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-          </svg>
-          {isMeasurementEnabled ? 'Previous' : 'Back to Selection'}
-        </button>
-
-        {/* Start Measurement / Complete / Status */}
-        {!isMeasurementEnabled ? (
-          <div className="flex items-center gap-3">
-            <button
-              onClick={handleStartMeasurement}
-              disabled={!selectedPOId}
-              className="btn-industrial bg-primary text-white hover:bg-slate-800 flex items-center min-w-[200px] justify-center shadow-sm"
-            >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Start Measurement
-            </button>
-            {/* TEST ANNOTATION BUTTON */}
-            <button
-              onClick={handleTestAnnotationMeasurement}
-              disabled={!selectedSize}
-              className="btn-industrial bg-orange-500 text-white hover:bg-orange-600 flex items-center min-w-[180px] justify-center shadow-sm"
-              title="Use test annotation (20 keypoints, 10 measurements)"
-            >
-              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-              </svg>
-              Test Annotation
-            </button>
-          </div>
-        ) : isPollingActive ? (
-          <button
-            onClick={handleCompleteMeasurement}
-            className="btn-industrial bg-success text-white hover:bg-green-600 flex items-center min-w-[240px] justify-center shadow-sm transition-colors"
-          >
-            <span className="w-2 h-2 rounded-full bg-white mr-2 animate-pulse"></span>
-            Complete Measurement
-          </button>
-        ) : (
-          <div className="btn-industrial bg-slate-100 text-success flex items-center min-w-[240px] justify-center border border-success/30">
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-            </svg>
-            Measurement Complete
-          </div>
-        )}
-
-        {/* Next Article / Finish Button */}
-        <button
-          onClick={handleNextArticle}
-          disabled={isSaving || (!measurementComplete && !isMeasurementEnabled)}
-          className={`btn-industrial flex items-center min-w-[160px] justify-center ${(measurementComplete || isMeasurementEnabled)
-            ? 'bg-primary text-white hover:bg-slate-800 shadow-sm'
-            : 'border border-slate-200 text-slate-400 bg-slate-50 cursor-not-allowed'
-            }`}
-        >
-          {isSaving ? (
-            <>
-              <div className="w-3.5 h-3.5 mr-2 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-              Saving...
-            </>
-          ) : (
-            <>
-              {currentPOArticleIndex < poArticles.length - 1 ? 'Next Article' : 'Finish Inspection'}
-              <svg className="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" />
-              </svg>
-            </>
-          )}
-        </button>
       </div>
     </div>
   )
 }
+

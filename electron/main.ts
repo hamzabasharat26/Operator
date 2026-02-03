@@ -35,7 +35,7 @@ async function startPythonServer(): Promise<boolean> {
   return new Promise((resolve) => {
     const pythonScript = path.join(process.env.APP_ROOT!, 'api_server.py')
     console.log('🐍 Starting Python API server:', pythonScript)
-    
+
     try {
       // Spawn Python process (hidden, no console window)
       pythonProcess = spawn('python', [pythonScript], {
@@ -309,9 +309,9 @@ function setupMeasurementHandlers() {
   }
 
   // Start measurement
-  ipcMain.handle('measurement:start', async (_event, config: { 
-    annotation_name: string; 
-    article_style?: string; 
+  ipcMain.handle('measurement:start', async (_event, config: {
+    annotation_name: string;
+    article_style?: string;
     side?: string;
     // New measurement-ready data from database
     keypoints_pixels?: string | null;
@@ -391,28 +391,173 @@ function setupMeasurementHandlers() {
     try {
       const path = await import('path')
       const fs = await import('fs')
-      
+
       // Resolve path relative to app root
       const appRoot = process.cwd()
       const imagePath = path.join(appRoot, relativePath)
-      
+
       console.log('[MAIN] Loading test image from:', imagePath)
-      
+
       if (!fs.existsSync(imagePath)) {
         console.log('[MAIN] Test image not found:', imagePath)
         return { status: 'error', message: 'Test image not found: ' + imagePath }
       }
-      
+
       // Read file and convert to base64
       const imageBuffer = fs.readFileSync(imagePath)
       const base64Image = imageBuffer.toString('base64')
-      
+
       console.log('[MAIN] Loaded test image, base64 length:', base64Image.length)
-      
+
       return { status: 'success', data: base64Image }
     } catch (error) {
       console.error('[MAIN] Error loading test image:', error)
       return { status: 'error', message: 'Error loading test image: ' + String(error) }
+    }
+  })
+
+  // Start camera calibration
+  ipcMain.handle('measurement:startCalibration', async () => {
+    try {
+      console.log('[MAIN] Starting camera calibration...')
+      const response = await fetch(`${PYTHON_API_URL}/api/calibration/start`, {
+        method: 'POST'
+      })
+      return await response.json()
+    } catch (error) {
+      console.error('[MAIN] Failed to start calibration:', error)
+      return { status: 'error', message: 'Could not start calibration. Please ensure Python server is running.' }
+    }
+  })
+
+  // Get calibration status
+  ipcMain.handle('measurement:getCalibrationStatus', async () => {
+    try {
+      const response = await fetch(`${PYTHON_API_URL}/api/calibration/status`)
+      return await response.json()
+    } catch (error) {
+      return { status: 'error', message: 'Could not fetch calibration status' }
+    }
+  })
+
+  // Cancel calibration
+  ipcMain.handle('measurement:cancelCalibration', async () => {
+    try {
+      const response = await fetch(`${PYTHON_API_URL}/api/calibration/cancel`, {
+        method: 'POST'
+      })
+      return await response.json()
+    } catch (error) {
+      return { status: 'error', message: 'Could not cancel calibration' }
+    }
+  })
+
+  // Fetch reference image from Laravel API (bypasses CORS in renderer)
+  ipcMain.handle('measurement:fetchLaravelImage', async (_event, articleStyle: string, size: string) => {
+    const LARAVEL_API_URL = 'http://127.0.0.1:8000'
+    const imageApiUrl = `${LARAVEL_API_URL}/api/uploaded-annotations/${encodeURIComponent(articleStyle)}/${encodeURIComponent(size)}/image-base64`
+
+    console.log('[MAIN] Fetching Laravel image:', imageApiUrl)
+
+    try {
+      const response = await fetch(imageApiUrl, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json'
+        }
+      })
+
+      if (!response.ok) {
+        return {
+          status: 'error',
+          message: `API returned ${response.status}: ${response.statusText}`
+        }
+      }
+
+      const data = await response.json()
+
+      if (data.success && data.image && data.image.data) {
+        console.log('[MAIN] Successfully fetched image from Laravel')
+        return {
+          status: 'success',
+          data: data.image.data,
+          mime_type: data.image.mime_type || 'image/jpeg',
+          width: data.image.width,
+          height: data.image.height
+        }
+      } else {
+        return {
+          status: 'error',
+          message: 'Invalid image response from API'
+        }
+      }
+    } catch (error) {
+      console.error('[MAIN] Failed to fetch Laravel image:', error)
+      return {
+        status: 'error',
+        message: `Could not connect to Laravel server: ${error}`
+      }
+    }
+  })
+
+  // Save annotation and image to temp_measure folder before measurement
+  ipcMain.handle('measurement:saveTempFiles', async (_event, data: {
+    keypoints: number[][]
+    target_distances: Record<string, number>
+    placement_box: number[] | null
+    image_width: number
+    image_height: number
+    image_base64: string
+  }) => {
+    const path = await import('path')
+    const fs = await import('fs')
+
+    const tempMeasureDir = path.join(process.cwd(), 'temp_measure')
+
+    console.log('[MAIN] Saving files to temp_measure folder:', tempMeasureDir)
+
+    try {
+      // Ensure temp_measure folder exists
+      if (!fs.existsSync(tempMeasureDir)) {
+        fs.mkdirSync(tempMeasureDir, { recursive: true })
+      }
+
+      // Save annotation_data.json
+      const annotationData = {
+        keypoints: data.keypoints,
+        target_distances: data.target_distances,
+        placement_box: data.placement_box,
+        image_width: data.image_width,
+        image_height: data.image_height
+      }
+
+      const jsonPath = path.join(tempMeasureDir, 'annotation_data.json')
+      fs.writeFileSync(jsonPath, JSON.stringify(annotationData, null, 2))
+      console.log('[MAIN] Saved annotation_data.json')
+
+      // Save reference_image.jpg
+      // Remove data:image/...;base64, prefix if present
+      let base64Data = data.image_base64
+      if (base64Data.includes(',')) {
+        base64Data = base64Data.split(',')[1]
+      }
+
+      const imagePath = path.join(tempMeasureDir, 'reference_image.jpg')
+      fs.writeFileSync(imagePath, Buffer.from(base64Data, 'base64'))
+      console.log('[MAIN] Saved reference_image.jpg')
+
+      return {
+        status: 'success',
+        message: 'Saved temp_measure files',
+        jsonPath,
+        imagePath
+      }
+    } catch (error) {
+      console.error('[MAIN] Failed to save temp_measure files:', error)
+      return {
+        status: 'error',
+        message: `Failed to save files: ${error}`
+      }
     }
   })
 }

@@ -65,4 +65,21 @@ contextBridge.exposeInMainWorld('measurement', {
   getStatus: () => ipcRenderer.invoke('measurement:getStatus'),
   getLiveResults: () => ipcRenderer.invoke('measurement:getLiveResults'),
   loadTestImage: (relativePath: string) => ipcRenderer.invoke('measurement:loadTestImage', relativePath),
+  // Calibration methods
+  startCalibration: () => ipcRenderer.invoke('measurement:startCalibration'),
+  getCalibrationStatus: () => ipcRenderer.invoke('measurement:getCalibrationStatus'),
+  cancelCalibration: () => ipcRenderer.invoke('measurement:cancelCalibration'),
+  // Fetch image from Laravel API (via main process to bypass CORS)
+  fetchLaravelImage: (articleStyle: string, size: string) =>
+    ipcRenderer.invoke('measurement:fetchLaravelImage', articleStyle, size),
+  // Save annotation and image files to temp_measure folder
+  saveTempFiles: (data: {
+    keypoints: number[][]
+    target_distances: Record<string, number>
+    placement_box: number[] | null
+    image_width: number
+    image_height: number
+    image_base64: string
+  }) => ipcRenderer.invoke('measurement:saveTempFiles', data),
 })
+

@@ -9,25 +9,47 @@ interface DatabaseAPI {
 }
 
 interface MeasurementAPI {
-    start: (config: { 
-      annotation_name: string; 
-      article_style?: string; 
-      side?: string;
-      // New measurement-ready data from database
-      keypoints_pixels?: string | null;   // JSON string [[x, y], ...] (pixel coordinates)
-      target_distances?: string | null;   // JSON string {"1": 3.81, ...} (distances in cm)
-      placement_box?: string | null;      // JSON string [x1, y1, x2, y2]
-      image_width?: number | null;
-      image_height?: number | null;
-      // Fallback: percentage-based annotations for conversion
-      annotation_data?: string;  // JSON string of annotation points [{x, y, label}]
-      image_data?: string;       // Base64 encoded reference image from database
-      image_mime_type?: string;  // MIME type of the image
+    start: (config: {
+        annotation_name: string;
+        article_style?: string;
+        side?: string;
+        // New measurement-ready data from database
+        keypoints_pixels?: string | null;   // JSON string [[x, y], ...] (pixel coordinates)
+        target_distances?: string | null;   // JSON string {"1": 3.81, ...} (distances in cm)
+        placement_box?: string | null;      // JSON string [x1, y1, x2, y2]
+        image_width?: number | null;
+        image_height?: number | null;
+        // Fallback: percentage-based annotations for conversion
+        annotation_data?: string;  // JSON string of annotation points [{x, y, label}]
+        image_data?: string;       // Base64 encoded reference image from database
+        image_mime_type?: string;  // MIME type of the image
     }) => Promise<{ status: string; message: string; data?: any }>
     stop: () => Promise<{ status: string; message: string }>
     getStatus: () => Promise<{ status: string; data: any }>
     getLiveResults: () => Promise<{ status: string; data: any; message?: string }>
     loadTestImage: (relativePath: string) => Promise<{ status: string; data?: string; message?: string }>
+    // Calibration methods
+    startCalibration: () => Promise<{ status: string; message: string }>
+    getCalibrationStatus: () => Promise<{ status: string; data: { calibrated: boolean; pixels_per_cm?: number; reference_length_cm?: number; calibration_date?: string } }>
+    cancelCalibration: () => Promise<{ status: string; message: string }>
+    // Fetch image from Laravel API via main process (bypasses CORS)
+    fetchLaravelImage: (articleStyle: string, size: string) => Promise<{
+        status: string;
+        data?: string;
+        mime_type?: string;
+        width?: number;
+        height?: number;
+        message?: string
+    }>
+    // Save annotation and image files to temp_measure folder
+    saveTempFiles: (data: {
+        keypoints: number[][]
+        target_distances: Record<string, number>
+        placement_box: number[] | null
+        image_width: number
+        image_height: number
+        image_base64: string
+    }) => Promise<{ status: string; message: string; jsonPath?: string; imagePath?: string }>
 }
 
 interface IpcRenderer {

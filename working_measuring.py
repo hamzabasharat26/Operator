@@ -48,17 +48,6 @@ class LiveKeypointDistanceMeasurer:
         self.last_measurements = []
         self.placement_box = []  # [x1, y1, x2, y2] for shirt placement guide
         
-        # Resolution handling for webcam vs native camera images
-        self.NATIVE_WIDTH = 5488
-        self.NATIVE_HEIGHT = 3672
-        self.WEBCAM_WIDTH = 1920
-        self.WEBCAM_HEIGHT = 1080
-        self.reference_is_webcam_resolution = False  # True if ref image is webcam res
-        self.reference_scale_factor = 1.0  # Scale factor from ref to native
-        # Matching resolution images (for feature matching)
-        self.reference_gray_matching = None  # Reference at matching resolution
-        self.keypoints_matching = []  # Keypoints scaled for matching resolution
-        
         # NEW: Pause functionality
         self.paused = False
         self.pause_frame = None
@@ -203,14 +192,7 @@ class LiveKeypointDistanceMeasurer:
             # Get keypoint names if available
             keypoint_names = getattr(self, 'keypoint_names', [])
             
-            for measurement in measurements:
-                # Support both old (4-tuple) and new (5-tuple with fallback flag) formats
-                if len(measurement) >= 5:
-                    pair_num, real_distance, pixel_distance, qc_passed, is_fallback = measurement[:5]
-                else:
-                    pair_num, real_distance, pixel_distance, qc_passed = measurement[:4]
-                    is_fallback = False
-                    
+            for pair_num, real_distance, pixel_distance, qc_passed in measurements:
                 name = keypoint_names[pair_num - 1] if pair_num <= len(keypoint_names) else f'Measurement {pair_num}'
                 measurement_data['measurements'].append({
                     'id': pair_num,
@@ -221,8 +203,7 @@ class LiveKeypointDistanceMeasurer:
                     'tolerance_minus': 1.0,
                     'min_valid': round(real_distance - 1.0, 2),
                     'max_valid': round(real_distance + 1.0, 2),
-                    'qc_passed': qc_passed,
-                    'is_fallback': is_fallback  # True if tracking failed and used annotation position
+                    'qc_passed': qc_passed
                 })
             
             # Save to live_measurements.json (always overwritten with latest)
@@ -274,90 +255,25 @@ class LiveKeypointDistanceMeasurer:
             return False
 
     def load_reference_image(self):
-        """Load reference image from file with resolution detection"""
+        """Load reference image from file"""
         try:
-            print(f"[DEBUG] Attempting to load reference image from: {self.reference_image_file}")
-            print(f"[DEBUG] File exists: {os.path.exists(self.reference_image_file)}")
-            
             if os.path.exists(self.reference_image_file):
-                # Log file details
-                file_size = os.path.getsize(self.reference_image_file)
-                print(f"[DEBUG] Reference image file size: {file_size} bytes")
-                
                 self.reference_image = cv2.imread(self.reference_image_file)
                 if self.reference_image is not None:
-                    img_height, img_width = self.reference_image.shape[:2]
-                    
-                    # Detect if reference is webcam resolution (upscaled to native)
-                    # Check for signs of upscaling: native dimensions but low detail
-                    # Also check if it's already at webcam resolution
-                    if img_width == self.WEBCAM_WIDTH and img_height == self.WEBCAM_HEIGHT:
-                        self.reference_is_webcam_resolution = True
-                        self.reference_scale_factor = self.NATIVE_WIDTH / self.WEBCAM_WIDTH
-                        print(f"[RES] Reference is at WEBCAM resolution ({img_width}x{img_height})")
-                        print(f"[RES] Scale factor to native: {self.reference_scale_factor:.3f}")
-                    elif img_width == self.NATIVE_WIDTH and img_height == self.NATIVE_HEIGHT:
-                        # Native resolution - check if it might be upscaled
-                        # For now, assume it might be upscaled if we have webcam keypoints
-                        self.reference_is_webcam_resolution = False
-                        self.reference_scale_factor = 1.0
-                        print(f"[RES] Reference is at NATIVE resolution ({img_width}x{img_height})")
-                    else:
-                        self.reference_is_webcam_resolution = False
-                        self.reference_scale_factor = 1.0
-                        print(f"[RES] Reference is at UNKNOWN resolution ({img_width}x{img_height})")
-                    
-                    # Create grayscale version for processing
+                    # Create grayscale version for faster processing
                     self.reference_gray = cv2.cvtColor(self.reference_image, cv2.COLOR_BGR2GRAY)
                     print(f"[OK] Reference image loaded: {self.reference_image_file}")
-                    print(f"[DIM] BGR Image dimensions: {self.reference_image.shape}")
-                    print(f"[DIM] Grayscale dimensions: {self.reference_gray.shape}")
-                    
-                    # Create matching-resolution version for feature matching
-                    # Always work at webcam resolution for matching to avoid upscaled blur
-                    self._prepare_matching_images()
-                    
+                    print(f"[DIM] Image dimensions: {self.reference_image.shape[1]}x{self.reference_image.shape[0]}")
                     return True
                 else:
                     print("[ERR] Failed to load reference image")
                     return False
             else:
-                print(f"[DIR] No reference image file found at: {self.reference_image_file}")
+                print("[DIR] No reference image file found")
                 return False
         except Exception as e:
             print(f"[ERR] Error loading reference image: {e}")
             return False
-    
-    def _prepare_matching_images(self):
-        """Prepare images and keypoints at matching resolution (webcam res)"""
-        if self.reference_gray is None:
-            return
-        
-        img_height, img_width = self.reference_gray.shape[:2]
-        
-        # If reference is larger than webcam resolution, resize for matching
-        if img_width > self.WEBCAM_WIDTH:
-            self.reference_gray_matching = cv2.resize(
-                self.reference_gray, 
-                (self.WEBCAM_WIDTH, self.WEBCAM_HEIGHT),
-                interpolation=cv2.INTER_AREA  # Best for downscaling
-            )
-            scale_factor = self.WEBCAM_WIDTH / img_width
-            print(f"[MATCH] Created matching reference at {self.WEBCAM_WIDTH}x{self.WEBCAM_HEIGHT}")
-            print(f"[MATCH] Scale factor for keypoints: {scale_factor:.3f}")
-            
-            # Scale keypoints to matching resolution
-            self.keypoints_matching = []
-            for kp in self.keypoints:
-                scaled_x = int(kp[0] * scale_factor)
-                scaled_y = int(kp[1] * scale_factor)
-                self.keypoints_matching.append([scaled_x, scaled_y])
-            print(f"[MATCH] Scaled {len(self.keypoints_matching)} keypoints to matching resolution")
-        else:
-            # Reference is already at or below matching resolution
-            self.reference_gray_matching = self.reference_gray.copy()
-            self.keypoints_matching = [kp.copy() if isinstance(kp, list) else list(kp) for kp in self.keypoints]
-            print(f"[MATCH] Using reference as-is for matching (already at {img_width}x{img_height})")
 
     def load_back_reference_image(self):
         """Load back reference image from file"""
@@ -673,18 +589,11 @@ class LiveKeypointDistanceMeasurer:
         frame = self.camera_obj.grab()
         if frame is not None:
             try:
-                # Squeeze mono (h,w,1) to grayscale (h,w)
-                if len(frame.shape) == 3 and frame.shape[2] == 1:
-                    frame_2d = frame[:, :, 0]
-                else:
-                    frame_2d = frame
-                
-                # Convert grayscale to BGR for display and annotation
-                self.reference_image = cv2.cvtColor(frame_2d, cv2.COLOR_GRAY2BGR)
-                # Keep proper 2D grayscale for processing
-                self.reference_gray = frame_2d.copy()
+                # Convert mono to BGR for display and annotation
+                self.reference_image = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                # Keep grayscale for faster processing
+                self.reference_gray = frame.copy()
                 print(f"[OK] Reference frame captured: {self.reference_image.shape[1]}x{self.reference_image.shape[0]}")
-                print(f"[OK] Reference gray shape: {self.reference_gray.shape}")
                 return True
             except Exception as e:
                 print(f"[ERR] Failed to process frame: {e}")
@@ -697,49 +606,26 @@ class LiveKeypointDistanceMeasurer:
         """Capture a back reference frame from camera"""
         frame = self.camera_obj.grab()
         if frame is not None:
-            # Squeeze mono (h,w,1) to grayscale (h,w)
-            if len(frame.shape) == 3 and frame.shape[2] == 1:
-                frame_2d = frame[:, :, 0]
-            else:
-                frame_2d = frame
-            
-            # Convert grayscale to BGR for display and annotation
-            self.back_reference_image = cv2.cvtColor(frame_2d, cv2.COLOR_GRAY2BGR)
-            # Keep proper 2D grayscale for processing
-            self.back_reference_gray = frame_2d.copy()
+            # Convert mono to BGR for display and annotation
+            self.back_reference_image = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+            # Keep grayscale for faster processing
+            self.back_reference_gray = frame.copy()
             print(f"Back reference frame captured: {self.back_reference_image.shape[1]}x{self.back_reference_image.shape[0]}")
-            print(f"[OK] Back reference gray shape: {self.back_reference_gray.shape}")
             return True
         return False
 
     def capture_live_frame(self):
-        """Capture a live frame from camera - returns proper 2D grayscale for processing"""
+        """Capture a live frame from camera - returns grayscale for processing"""
         frame = self.camera_obj.grab()
         if frame is not None:
-            # Squeeze mono (h,w,1) to grayscale (h,w)
-            if len(frame.shape) == 3 and frame.shape[2] == 1:
-                return frame[:, :, 0]
-            return frame
+            return frame  # Already grayscale/mono
         return None
 
     def extract_features_fast(self, image):
         """Extract features using fast methods optimized for grayscale"""
-        # Handle different input formats
-        if image is None:
-            return [], None
-        
-        # Ensure 2D grayscale
         if len(image.shape) == 3:
-            if image.shape[2] == 1:
-                # Mono channel (h,w,1) - squeeze to (h,w)
-                gray = image[:, :, 0]
-            elif image.shape[2] == 3:
-                # BGR - convert to grayscale
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = image
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         else:
-            # Already 2D grayscale
             gray = image
             
         h, w = gray.shape[:2]
@@ -1195,59 +1081,17 @@ class LiveKeypointDistanceMeasurer:
         return fused_corners
 
     def transfer_keypoints_robust(self, current_gray):
-        """Robust keypoint transfer using multiple methods with grayscale processing
-        
-        RESOLUTION-AWARE: Performs matching at webcam resolution to avoid issues with
-        upscaled reference images that have blurry features.
-        """
+        """Robust keypoint transfer using multiple methods with grayscale processing"""
         current_reference_gray = self.reference_gray if self.current_side == 'front' else self.back_reference_gray
         current_keypoints = self.keypoints if self.current_side == 'front' else self.back_keypoints
         
         if current_reference_gray is None or len(current_keypoints) == 0:
-            print(f"[DEBUG] transfer_keypoints_robust: ref_gray={current_reference_gray is not None}, keypoints={len(current_keypoints)}")
             return []
-        
-        # Get matching-resolution reference image and keypoints
-        ref_gray_for_matching = self.reference_gray_matching if self.reference_gray_matching is not None else current_reference_gray
-        keypoints_for_matching = self.keypoints_matching if self.keypoints_matching else current_keypoints
-        
-        # Check if we need to resize live frame to match reference resolution
-        live_height, live_width = current_gray.shape[:2]
-        ref_height, ref_width = ref_gray_for_matching.shape[:2]
-        
-        # Scale factors for converting between resolutions
-        scale_up_x = live_width / ref_width  # To scale matched points back to live resolution
-        scale_up_y = live_height / ref_height
-        need_scale_up = abs(scale_up_x - 1.0) > 0.01 or abs(scale_up_y - 1.0) > 0.01
-        
-        # Resize live frame to matching resolution if needed
-        if need_scale_up:
-            current_gray_matching = cv2.resize(
-                current_gray, 
-                (ref_width, ref_height),
-                interpolation=cv2.INTER_AREA  # Best for downscaling
-            )
-        else:
-            current_gray_matching = current_gray
-        
-        # DEBUG: Print image shapes once
-        if not hasattr(self, '_shape_debug_printed') or not self._shape_debug_printed:
-            print(f"[DEBUG] Reference gray shape (original): {current_reference_gray.shape}")
-            print(f"[DEBUG] Reference gray shape (matching): {ref_gray_for_matching.shape}")
-            print(f"[DEBUG] Current (live) gray shape (original): {current_gray.shape}")
-            print(f"[DEBUG] Current (live) gray shape (matching): {current_gray_matching.shape}")
-            print(f"[DEBUG] Scale up factors: x={scale_up_x:.3f}, y={scale_up_y:.3f}")
-            print(f"[DEBUG] Number of keypoints (original): {len(current_keypoints)}")
-            print(f"[DEBUG] Number of keypoints (matching): {len(keypoints_for_matching)}")
-            print(f"[DEBUG] First keypoint (original): {current_keypoints[0] if current_keypoints else 'N/A'}")
-            print(f"[DEBUG] First keypoint (matching): {keypoints_for_matching[0] if keypoints_for_matching else 'N/A'}")
-            self._shape_debug_printed = True
             
         try:
             # METHOD 1: Feature-based matching with homography/MLS
-            # Use matching-resolution images for feature extraction
-            ref_kp, ref_desc = self.extract_features_fast(ref_gray_for_matching)
-            curr_kp, curr_desc = self.extract_features_fast(current_gray_matching)
+            ref_kp, ref_desc = self.extract_features_fast(current_reference_gray)
+            curr_kp, curr_desc = self.extract_features_fast(current_gray)
             
             feature_points = []
             scale_factor = 1.0
@@ -1352,25 +1196,9 @@ class LiveKeypointDistanceMeasurer:
             # Print transfer method statistics
             if len(matches) >= self.min_matches:
                 print(f"[STAT] Transfer: {len(matches)} matches, {valid_feature_count}/{len(current_keypoints)} feature points, {valid_template_count}/{len(current_keypoints)} template points, {valid_corner_count}/{min(self.corner_keypoints_count, len(current_keypoints))} corner points")
-            else:
-                # DEBUG: Print when no tracking is working
-                print(f"[WARN] Keypoint transfer failed: matches={len(matches) if 'matches' in locals() else 0}, min_required={self.min_matches}")
-                print(f"[WARN] Feature descriptors - ref: {len(ref_desc) if ref_desc is not None else 0}, curr: {len(curr_desc) if curr_desc is not None else 0}")
             
             # Apply stabilization to fused points
             stabilized_points = self.stabilize_keypoints(fused_points)
-            
-            # Scale up points to live resolution if matching was done at lower resolution
-            if need_scale_up:
-                scaled_points = []
-                for pt in stabilized_points:
-                    if pt[0] != -1 and pt[1] != -1:
-                        scaled_x = pt[0] * scale_up_x
-                        scaled_y = pt[1] * scale_up_y
-                        scaled_points.append([scaled_x, scaled_y])
-                    else:
-                        scaled_points.append([-1, -1])
-                return scaled_points
             
             return stabilized_points
             
@@ -2713,23 +2541,14 @@ class LiveKeypointDistanceMeasurer:
         print("\n" + "="*50)
         print(f"LIVE {self.current_side.upper()} MEASUREMENTS")
         print("="*50)
-        for measurement in measurements:
-            # Support both old (4-tuple) and new (5-tuple with fallback flag) formats
-            if len(measurement) >= 5:
-                pair_num, distance_cm, distance_px, qc_result, is_fallback = measurement[:5]
-            else:
-                pair_num, distance_cm, distance_px, qc_result = measurement[:4]
-                is_fallback = False
-                
-            fallback_marker = " [ESTIMATED]" if is_fallback else ""
-            
+        for i, (pair_num, distance_cm, distance_px, qc_result) in enumerate(measurements):
             if self.is_calibrated:
                 current_target_distances = self.target_distances if self.current_side == 'front' else self.back_target_distances
                 target = current_target_distances.get(pair_num, "Not set")
                 status = "[OK] PASS" if qc_result else "[ERR] FAIL"
-                print(f"Pair {pair_num}: {distance_cm:.2f} cm (Target: {target} cm) - {status}{fallback_marker}")
+                print(f"Pair {pair_num}: {distance_cm:.2f} cm (Target: {target} cm) - {status}")
             else:
-                print(f"Pair {pair_num}: {distance_px:.1f} pixels{fallback_marker}")
+                print(f"Pair {pair_num}: {distance_px:.1f} pixels")
         print("="*50)
 
     def live_mouse_callback(self, event, x, y, flags, param):
@@ -2948,35 +2767,32 @@ class LiveKeypointDistanceMeasurer:
             
             # Enhanced status information
             current_keypoints = self.keypoints if self.current_side == 'front' else self.back_keypoints
-            valid_points = len([p for p in self.transferred_keypoints if p[0] != -1]) if self.transferred_keypoints else 0
+            valid_points = len([p for p in self.transferred_keypoints if p[0] != -1])
             total_points = len(current_keypoints) if current_keypoints else 0
-            
-            # Determine tracking mode display
-            if self.keypoint_stabilized:
-                tracking_status = "[OK] STABLE"
-            else:
-                tracking_status = "[~] TRACKING"
             
             status_lines = [
                 f"Side: {self.current_side.upper()}",
                 f"Points: {valid_points}/{total_points} valid",
-                f"Mode: {tracking_status}",
+                f"Corners: {len([p for i, p in enumerate(self.transferred_keypoints) if p[0] != -1 and i < self.corner_keypoints_count])}/{min(self.corner_keypoints_count, total_points)}",
+                f"Tracking: {'[OK] STABLE' if self.keypoint_stabilized else '[SWITCH] ADAPTING'}",
+                f"Scale Factor: {self.last_detected_scale:.2f}x",
                 f"Calibrated: {self.is_calibrated}",
                 f"Resolution: {self.pixels_per_cm:.2f} px/cm" if self.is_calibrated else "Scale: Not calibrated",
-                f"Placement Guide: {'ON' if hasattr(self, 'placement_box') and self.placement_box and self.current_side == 'front' else 'OFF'}",
-                f"Zoom: {self.zoom_factor:.1f}x",
-                f"Status: {'PAUSED' if self.paused else 'LIVE'}",
-                "P=Pause, B=Side, Z/X=Zoom, R=Reset, Q=Quit"
+                f"Placement Guide: {'[OK] ON' if hasattr(self, 'placement_box') and self.placement_box and self.current_side == 'front' else '[ERR] OFF'}",
+                f"Processing: GRAYSCALE (FAST)",
+                f"Zoom: {self.zoom_factor:.1f}x" if self.zoom_factor > 1.0 else "Zoom: 1.0x",
+                f"Status: {'⏸[?] PAUSED' if self.paused else '[?] LIVE'}",
+                "Controls: P=Pause, B=Switch Side, Z/X=Zoom, R=Reset, Mouse=Pan/Zoom, Q=Quit"
             ]
             
             # Draw status panel
-            status_bg_height = len(status_lines) * 32 + 20
-            cv2.rectangle(display_frame, (0, 0), (550, status_bg_height), (0, 0, 0), -1)
-            cv2.rectangle(display_frame, (0, 0), (550, status_bg_height), (255, 255, 255), 2)
+            status_bg_height = len(status_lines) * 35 + 30
+            cv2.rectangle(display_frame, (0, 0), (600, status_bg_height), (0, 0, 0), -1)
+            cv2.rectangle(display_frame, (0, 0), (600, status_bg_height), (255, 255, 255), 3)
             
             for i, line in enumerate(status_lines):
-                cv2.putText(display_frame, line, (10, 28 + i*32), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+                cv2.putText(display_frame, line, (15, 35 + i*35), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
             
             # Add pause indicator
             if self.paused:
@@ -2994,9 +2810,9 @@ class LiveKeypointDistanceMeasurer:
                 # Toggle pause
                 self.paused = not self.paused
                 if self.paused:
-                    print("[PAUSE] Measurement PAUSED - Press P to resume")
+                    print("⏸[?] Measurement PAUSED - Press P to resume")
                 else:
-                    print("[PAUSE] Measurement RESUMED")
+                    print("[?] Measurement RESUMED")
             elif key == ord('b') or key == ord('B'):
                 # Switch between front and back sides
                 if self.current_side == 'front':
